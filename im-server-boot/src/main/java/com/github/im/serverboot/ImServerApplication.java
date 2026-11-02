@@ -24,13 +24,15 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * 但错误信息离真正的原因（少扫了一个包）很远。{@code ImServerApplicationScanTest} 会盯着这件事。
  *
  * <p>列进来不会带来额外开销：jdbc 的装配类只在 {@code im.storage=jdbc} 时才创建 DataSource，
- * mongodb 的装配类只在 {@code im.storage=mongodb} 时才创建 MongoClient，
- * redis 的装配类只在 {@code im.storage=redis}（或缺省）时才创建四个端口，
- * 三者条件互斥，未命中的那些连一个 Bean 都不会产生。
+ * mongodb 的装配类只在 {@code im.storage=mongodb}（缺省）时才创建 MongoClient，
+ * 两者条件互斥，未命中的那个连一个 Bean 都不会产生。
+ *
+ * <p>注意这里<b>没有</b> {@code com.github.im.storage.redis}：Redis 形态的存储实现已经移除，
+ * Redis 仅作为热路径共享状态（发号 / 幂等 / 离线队列 / 路由 / 在线态 / 水位）的载体，
+ * 那些代码在 {@code com.github.im.server} 里，不随 {@code im.storage} 切换。
  */
 @SpringBootApplication(scanBasePackages = {
         "com.github.im.server",
-        "com.github.im.storage.redis",
         "com.github.im.storage.jdbc",
         "com.github.im.storage.mongodb",
         "com.github.im.serverboot"})

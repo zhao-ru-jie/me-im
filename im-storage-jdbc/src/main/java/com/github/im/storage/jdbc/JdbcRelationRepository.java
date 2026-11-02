@@ -14,11 +14,11 @@ import java.util.List;
 /**
  * 关系链的 MySQL 实现（{@code im.storage=jdbc}）。
  *
- * <p>与 Redis 形态的差别只在介质：
+ * <p>与 Mongo 实现的差别只在介质，语义完全一致：
  * <ul>
  *   <li>好友双向两行、黑名单单向一行——都为了 {@code (owner_id, target_id, relation_type)}
  *       唯一键上的点查，理由见 {@code schema.sql}；</li>
- *   <li>批量写入走 {@code INSERT IGNORE} 而不是两次 SADD：关系同步是幂等重放，
+ *   <li>批量写入走 {@code INSERT IGNORE}（不是「先查再插」）：关系同步是幂等重放，
  *       「先查再插」在并发下照样撞唯一键。</li>
  * </ul>
  *

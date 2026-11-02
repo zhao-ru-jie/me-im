@@ -32,7 +32,7 @@
 
           它会把 spring-boot-starter-jdbc 一并带进来（spring-jdbc + HikariCP 我们本来就在用），
           但 MybatisPlusAutoConfiguration 是 @ConditionalOnSingleCandidate(DataSource.class)：
-          im.storage=redis 时不创建 DataSource，MyBatis 相关 Bean 一个都不会生成。
+          非 im.storage=jdbc 时不创建 DataSource，MyBatis 相关 Bean 一个都不会生成。
         -->
         <dependency>
             <groupId>com.baomidou</groupId>

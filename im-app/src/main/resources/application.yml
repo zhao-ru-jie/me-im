@@ -3,14 +3,14 @@ spring:
     name: im-app
   # im-storage-jdbc 把 spring-boot-starter-jdbc 带进 classpath，而 Boot 的 DataSourceAutoConfiguration
   # 只看「classpath 上有 DataSource + HikariCP、容器里没有 DataSource Bean」就去建连接池，
-  # 于是 im.storage=redis（默认）时也会因为没有 DSN 而启动失败：
+  # 于是 im.storage=mongodb（默认）时也会因为没有 DSN 而启动失败：
   # 「Failed to determine a suitable driver class」。jdbc 形态的连接池由 JdbcStorageConfig 显式创建
   # （那种情形下该自动装配本来就会 @ConditionalOnMissingBean 退让），故这里一次性排除。
   autoconfigure:
     exclude:
       - org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration
       # im-storage-mongodb 把 Boot 的 Mongo 自动装配带进了 classpath，它是「有就生效」而与
-      # im.storage 无关：不排除的话，Redis 形态会多出一个指向 localhost:27017 的客户端，
+      # im.storage 无关：不排除的话，选 jdbc 时也会多出一个指向 localhost:27017 的客户端，
       # 以及一个连不上就报 DOWN 的健康指示器（经 Actuator 聚合会传到 grpc.health）。
       # 客户端与 MongoTemplate 由 MongoStorageConfig 在 im.storage=mongodb 时显式创建。
       - org.springframework.boot.mongodb.autoconfigure.MongoAutoConfiguration
@@ -81,12 +81,15 @@ im:
     mode: ${IM_AUTH_MODE:off}
     secret: ${IM_AUTH_SECRET:}
   # —— 存储形态 ——
-  #   redis（默认）: Redis List/Set，零外部数据库依赖，本地开发/联调
-  #   jdbc         : MySQL（im-storage-jdbc 模块），强关系/事务形态；需要配下面 im.db.*
-  #   mongodb      : MongoDB（im-storage-mongodb 模块），文档形态；需要配下面 im.mongo.*
-  storage: ${IM_STORAGE:redis}
+  #   mongodb（默认）: MongoDB（im-storage-mongodb 模块），文档形态；需要配下面 im.mongo.*
+  #   jdbc          : MySQL（im-storage-jdbc 模块），强关系/事务形态；需要配下面 im.db.*
+  #
+  # 没有 redis 形态了：消息/群/关系链这类「持久化真相」不能只落在共享的 Redis 单点上
+  # （一次主从切换或内存淘汰就等于丢历史消息）。Redis 仍然需要，但只承载热路径共享状态
+  # ——发号、幂等、离线队列、路由、在线态、水位；这些在 im-server 内部直连，不随本开关切换。
+  storage: ${IM_STORAGE:mongodb}
   db:
-    # 仅 im.storage=jdbc 时才读取；留空且使用 redis 时不会创建任何连接池
+    # 仅 im.storage=jdbc 时才读取；mongodb 形态下不会创建任何连接池
     url: ${IM_DB_URL:}
     username: ${IM_DB_USERNAME:root}
     password: ${IM_DB_PASSWORD:}

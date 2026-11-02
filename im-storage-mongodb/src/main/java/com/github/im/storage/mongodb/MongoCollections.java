@@ -33,6 +33,12 @@ public final class MongoCollections {
     /** 好友申请（一条文档 = 一对用户的一条申请，_id = fromId:toId） */
     public static final String FRIEND_REQUEST = "im_friend_request";
 
+    /** 入群申请（一条文档 = 一条申请，_id = groupId:applicantId） */
+    public static final String GROUP_JOIN_REQUEST = "im_group_join_request";
+
+    /** 群邀请码（一条文档 = 一个码，_id 就是码本身） */
+    public static final String GROUP_INVITE = "im_group_invite";
+
     private MongoCollections() {
     }
 }

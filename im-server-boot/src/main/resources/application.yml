@@ -3,15 +3,15 @@ spring:
     name: im-server
   # im-storage-jdbc 把 spring-boot-starter-jdbc 带进 classpath，而 Boot 的 DataSourceAutoConfiguration
   # 只看「classpath 上有 DataSource + HikariCP、容器里没有 DataSource Bean」就去建连接池——
-  # 于是 im.storage=redis（默认）时也会因为没有任何 DSN 而启动失败：
+  # 于是 im.storage=mongodb（默认）时也会因为没有任何 DSN 而启动失败：
   # 「Failed to determine a suitable driver class」。两个存储形态的装配本来就由我们自己掌控：
   # jdbc 的连接池在 JdbcStorageConfig 里显式创建（那种情形下该自动装配本来就会因
-  # @ConditionalOnMissingBean 退让），所以这里一次性排除，redis 形态才是真的零数据库依赖。
+  # @ConditionalOnMissingBean 退让），所以这里一次性排除，选 mongodb 时才不需要任何 MySQL DSN。
   autoconfigure:
     exclude:
       - org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration
       # 同理，im-storage-mongodb 把 Boot 的 Mongo 自动装配带进了 classpath，而它只看
-      # 「classpath 上有 MongoClient/Spring Data MongoDB」就生效：不排除的话，只想用 Redis 的部署
+      # 「classpath 上有 MongoClient/Spring Data MongoDB」就生效：不排除的话，选 jdbc 的部署
       # 也会多出一个指向 localhost:27017 的客户端和一个连不上就报 DOWN 的健康指示器——
       # 后者经 Actuator 聚合传导到 grpc.health.v1，会让网关把实例摘掉。
       # 客户端与 MongoTemplate 由 MongoStorageConfig 在 im.storage=mongodb 时显式创建；
@@ -81,10 +81,10 @@ management:
 
 im:
   # —— 存储形态 ——
-  #   redis（默认）: Redis List/Set，零外部数据库依赖，本地开发/联调
-  #   jdbc         : MySQL（im-storage-jdbc 模块），强关系/事务形态；需要配下面 im.db.*
-  #   mongodb      : MongoDB（im-storage-mongodb 模块），文档形态；需要配下面 im.mongo.*
-  # 三种形态各自提供同一组端口（消息 / 群 / 成员 / 关系链），业务侧不感知介质。
+  #   mongodb（默认）: MongoDB（im-storage-mongodb 模块），文档形态；需要配下面 im.mongo.*
+  #   jdbc          : MySQL（im-storage-jdbc 模块），强关系/事务形态；需要配下面 im.db.*
+  # 两种形态各自提供同一组端口（消息 / 群 / 成员 / 关系链 / 好友申请 / 入群申请与邀请码），
+  # 业务侧不感知介质。Redis 不再是存储形态：它只承载热路径共享状态，见下面 im.redis.degrade。
   storage: ${IM_STORAGE:mongodb}
   redis:
     degrade:

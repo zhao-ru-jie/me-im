@@ -16,16 +16,24 @@ COPY im-proto/pom.xml im-proto/
 COPY im-rpc/pom.xml im-rpc/
 COPY im-gateway/pom.xml im-gateway/
 COPY im-server/pom.xml im-server/
+COPY im-storage-jdbc/pom.xml im-storage-jdbc/
+COPY im-storage-mongodb/pom.xml im-storage-mongodb/
 COPY im-app/pom.xml im-app/
 COPY im-gateway-boot/pom.xml im-gateway-boot/
 COPY im-server-boot/pom.xml im-server-boot/
+COPY im-benchmark/pom.xml im-benchmark/
+COPY im-client/pom.xml im-client/
 COPY im-proto/src im-proto/src
 COPY im-rpc/src im-rpc/src
 COPY im-gateway/src im-gateway/src
 COPY im-server/src im-server/src
+COPY im-storage-jdbc/src im-storage-jdbc/src
+COPY im-storage-mongodb/src im-storage-mongodb/src
 COPY im-app/src im-app/src
 COPY im-gateway-boot/src im-gateway-boot/src
 COPY im-server-boot/src im-server-boot/src
+COPY im-benchmark/src im-benchmark/src
+COPY im-client/src im-client/src
 RUN mvn -B -DskipTests package
 
 # ---- 运行阶段 ----

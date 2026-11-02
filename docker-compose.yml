@@ -1,7 +1,28 @@
-# IM 集群演示用中间件：Redis（路由表 + 离线消息）+ Nacos（节点 gRPC 地址动态发现）
+# IM 集群演示用中间件：MongoDB（消息/群/关系链等持久化真相，缺省存储形态）
+#                    + Redis（发号/幂等/离线队列/路由/在线态等热路径共享状态）
+#                    + Nacos（节点 gRPC 地址动态发现）
 # 启动： docker compose up -d
 # 停止： docker compose down
 services:
+  # 持久化真相：im.storage=mongodb（缺省）。历史消息不能只落在 Redis 上——
+  # key 会过期、主从切换会丢一段内存，而消息历史丢一条就是不可恢复的用户数据。
+  mongodb:
+    image: mongo:7
+    container_name: im-cluster-mongo
+    ports:
+      - "27017:27017"
+    # 不启用认证，与 application.yml 里 im.mongo.uri 的默认值一致
+    command: ["--bind_ip_all"]
+    volumes:
+      - im-mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 热路径共享状态：发号（seq）、幂等、离线队列、游标/水位、网关路由、在线态。
+  # 这些都不是「唯一真相」，Redis 故障时各有本地降级（见 RedisDegrade）。
   redis:
     image: redis:7-alpine
     container_name: im-cluster-redis
@@ -33,3 +54,6 @@ services:
       timeout: 5s
       retries: 10
     restart: on-failure
+
+volumes:
+  im-mongo-data:

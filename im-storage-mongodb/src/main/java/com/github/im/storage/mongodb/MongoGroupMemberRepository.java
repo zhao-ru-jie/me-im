@@ -31,7 +31,7 @@ import java.util.Map;
  * <h2>反向索引不需要额外维护</h2>
  *
  * <p>{@link #groupsOf} 走 {@code idx_group_member_user (userId)} 的普通二级查询即可。
- * Redis 形态必须额外维护 {@code im:group:user:{userId}} 这个 Set，是因为它没有二级索引；
+ * 没有二级索引的 KV 存储只能额外维护一份 {@code userId -> groupId} 的反向集合；
  * MongoDB 有索引，就不该再引入一份需要双写的一致性负担。
  *
  * @author zhaorujie

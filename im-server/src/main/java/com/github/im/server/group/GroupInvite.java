@@ -16,8 +16,8 @@ package com.github.im.server.group;
  *       用群 ID 当邀请码等于把「不可枚举的群 ID」公开出去；</li>
  *   <li>{@code expiresAt} 与 {@code maxUses} 可同时生效，任一触顶即失效——这是拉人链接
  *       最常见的两个诉求（限时、限量）；</li>
- *   <li>{@code uses} 必须由存储侧<b>原子自增</b>（Redis Lua），否则并发扫码会把
- *       {@code maxUses=1} 的链接用成多次；</li>
+ *   <li>{@code uses} 必须由存储侧<b>原子自增</b>（条件 {@code UPDATE} / 条件 {@code $inc}），
+ *       否则并发扫码会把 {@code maxUses=1} 的链接用成多次；</li>
  *   <li>{@code approvalRequired}：链接默认直接入群（拉人场景），但公开群/大群常需要
  *       管理员过一道，此时扫码只是「提交一条申请」。</li>
  * </ul>

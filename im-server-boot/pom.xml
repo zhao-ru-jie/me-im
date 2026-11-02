@@ -20,19 +20,13 @@
             <artifactId>im-server</artifactId>
         </dependency>
 
-        <!-- Redis 版消息存储：im.storage=redis 或缺省时生效 -->
-        <dependency>
-            <groupId>com.github</groupId>
-            <artifactId>im-storage-redis</artifactId>
-        </dependency>
-
-        <!-- MySQL 版消息存储：im.storage=jdbc 时生效；redis 形态下不建连接池、不加载 MyBatis -->
+        <!-- MySQL 版消息存储：im.storage=jdbc 时生效；mongodb 形态下不建连接池、不加载 MyBatis -->
         <dependency>
             <groupId>com.github</groupId>
             <artifactId>im-storage-jdbc</artifactId>
         </dependency>
 
-        <!-- MongoDB 版存储：im.storage=mongodb 时生效；其余形态下不建客户端、连不上也不会有人去连 -->
+        <!-- MongoDB 版存储：im.storage=mongodb 时生效（缺省形态）；其余形态下不建客户端 -->
         <dependency>
             <groupId>com.github</groupId>
             <artifactId>im-storage-mongodb</artifactId>

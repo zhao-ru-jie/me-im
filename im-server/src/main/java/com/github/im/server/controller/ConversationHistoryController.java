@@ -37,8 +37,9 @@ import java.util.Map;
  *
  * <p>不带 {@code userId} 时按服务端调试视角返回（不过滤删除），仅用于排障。
  *
- * <p>读的是 {@link MessageService#history}，因此 {@code im.storage} 切到 jdbc 后
- * 自动走 {@code im_message} 的 {@code uk_msg_conv_seq} 索引，Redis 形态下走 List 尾部范围读。
+ * <p>读的是 {@link MessageService#history}：无论 {@code im.storage} 选哪种形态，
+ * 翻页都落在 {@code im_message} 上的会话内 seq 索引（{@code uk_msg_conv_seq} / 复合索引），
+ * 代价只与「这一页多少条」相关，与会话总量无关。
  *
  * @author zhaorujie
  * @since 1.0.0

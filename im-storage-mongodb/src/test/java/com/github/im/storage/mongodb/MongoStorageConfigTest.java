@@ -28,8 +28,8 @@ import static org.mockito.Mockito.mock;
  * 埋在几十个 Bean 里。客户端与模板用 mock（配置类上加了 {@code @ConditionalOnMissingBean}），
  * 于是这套断言不需要任何 Mongo 实例。
  *
- * <p>与 {@code RedisStorageConfig} / {@code JdbcStorageConfig} 的互斥由各自的
- * {@code havingValue} 保证，这里只验本模块一侧。
+ * <p>与 {@code JdbcStorageConfig} 的互斥由各自的 {@code havingValue} 保证，
+ * 这里只验本模块一侧。
  */
 class MongoStorageConfigTest {
 
@@ -57,9 +57,9 @@ class MongoStorageConfigTest {
     }
 
     @Test
-    @DisplayName("im.storage=redis / jdbc → 本模块一个端口都不建")
+    @DisplayName("im.storage=jdbc / none → 本模块一个端口都不建")
     void registersNothingForOtherMedia() {
-        for (String storage : new String[]{"redis", "jdbc"}) {
+        for (String storage : new String[]{"jdbc", "none"}) {
             try (AnnotationConfigApplicationContext context = context(Map.of("im.storage", storage))) {
                 assertEquals(0, context.getBeansOfType(MessageRepository.class).size(),
                         storage + " 形态下不该同时存在 MongoDB 实现，否则同一端口会有两个 Bean");

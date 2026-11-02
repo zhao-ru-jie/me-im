@@ -34,7 +34,7 @@ A 发给 B 的消息经 **Redis 在线路由表定位目标网关 + gRPC 实例�
 | 长连接 | **Netty 4.2**（自建 ServerBootstrap） | WebSocket + 原生 TCP 双通道，不依赖 Tomcat 承载长连接 |
 | 服务间通信 | **gRPC**（`spring-boot-starter-grpc-server`） | 双向：上行 `MessageIngress`、下行 `DownstreamPush` |
 | 状态存储 | **Redis** | 在线路由、离线队列、seq 分配、幂等表 |
-| 消息存储 | **Redis / MySQL / MongoDB 可切换** | `im.storage` 决定实现，同一份 jar |
+| 消息存储 | **MongoDB（缺省）/ MySQL 可切换** | `im.storage` 决定实现，同一份 jar |
 | 服务发现 | **Redis 路由表 + Nacos（可选）** | 路由由 Redis 承担，Nacos 只做「实例 ID → 可达 ip:port」 |
 | 部署 | Docker / Kubernetes | HPA 按连接数扩缩容 |
 
@@ -50,9 +50,8 @@ A 发给 B 的消息经 **Redis 在线路由表定位目标网关 + gRPC 实例�
 | `im-rpc` | gRPC 适配（客户端侧） | 按方向分包：`rpc.common`（channel 复用与 TLS、地址解析）、`rpc.ingress`（网关→IM：`RemoteMessageIngress`）、`rpc.push`（IM→网关：`RemoteGatewayPushPort` + 在线路由只读视图） | 依赖 jar |
 | `im-gateway` | **长连接服务** | Netty 双通道接入、会话管理、心跳、上行转发、下行推送、优雅摘流、连接数指标 | 库 |
 | `im-server` | **IM 服务** | 消息受理（幂等 + seq）、路由决策、离线兜底、历史消息、群成员；**不含任何存储实现** | 库 |
-| `im-storage-redis` | 存储实现插件（缺省） | `MessageRepository` / `GroupRepository` / `GroupMemberRepository` / `RelationRepository` / `FriendRequestRepository` 的 Redis 实现 | 依赖 jar |
-| `im-storage-jdbc` | 存储实现插件（生产） | `MessageRepository` / `GroupMemberRepository` 的 MySQL 实现 + DDL | 依赖 jar |
-| `im-storage-mongodb` | 存储实现插件（文档形态） | 四个存储端口的 MongoDB 实现；实体映射（`@Document` / `@MongoId` / `@CompoundIndex`）+ 注解驱动的索引创建 | 依赖 jar |
+| `im-storage-jdbc` | 存储实现插件（关系形态） | 全部存储端口的 MySQL 实现（消息 / 群成员 / 群资料 / 关系链 / 好友申请 / 入群申请与邀请码）+ DDL | 依赖 jar |
+| `im-storage-mongodb` | 存储实现插件（文档形态，缺省） | 全部存储端口的 MongoDB 实现；实体映射（`@Document` / `@MongoId` / `@CompoundIndex`）+ 注解驱动的索引创建 | 依赖 jar |
 | `im-app` | 单体装配入口 | 同进程装配网关 + IM 服务，可执行 fat jar | fat jar |
 | `im-gateway-boot` | 拆分部署：长连接服务 | 只做接入，上行全走 gRPC | fat jar |
 | `im-server-boot` | 拆分部署：IM 服务 | 只承载业务与存储，暴露 `MessageIngress`，经 `RemoteGatewayPushPort` 下发 | fat jar |
@@ -65,9 +64,8 @@ im-app   ──> im-gateway ──┐
          ──> im-rpc ──────┘
 
 im-gateway-boot ──> im-gateway / im-rpc ──> im-proto
-im-server-boot  ──> im-server  / im-rpc / im-storage-redis / im-storage-jdbc / im-storage-mongodb ──> im-proto
+im-server-boot  ──> im-server  / im-rpc / im-storage-jdbc / im-storage-mongodb ──> im-proto
 
-im-storage-redis   ──> im-server ──> im-proto
 im-storage-jdbc    ──> im-server ──> im-proto
 im-storage-mongodb ──> im-server ──> im-proto
 ```
@@ -77,9 +75,9 @@ im-storage-mongodb ──> im-server ──> im-proto
 1. **`im-gateway` 与 `im-server` 互不依赖**，唯一共享物是 `im-proto`；
 2. 业务模块不依赖 `im-rpc`，保持「业务代码里看不到传输细节」；
 3. `im-storage-*` 都只单向依赖 `im-server` 的存储端口，**反向不依赖**——换存储实现不改业务。
-   jdbc 模块刻意不用 `spring-boot-starter-jdbc`，避免只用 Redis 的部署被自动装配出一个连不上的 DataSource；
-   mongodb 模块同理排除 Boot 的 Mongo 自动装配，避免 Redis 形态多出一个连不上 `localhost:27017` 的客户端。
-   三者由 `im.storage` 三选一装配（`redis` 或缺省 / `jdbc` / `mongodb`），互斥条件写在各自的 `*StorageConfig` 里。
+   jdbc 模块刻意不用 `spring-boot-starter-jdbc`，避免选 mongodb 的部署被自动装配出一个连不上的 DataSource；
+   mongodb 模块同理排除 Boot 的 Mongo 自动装配，避免选 jdbc 时多出一个连不上 `localhost:27017` 的客户端。
+   两者由 `im.storage` 二选一装配（`mongodb` 缺省 / `jdbc`），互斥条件写在各自的 `*StorageConfig` 里。
 
 ### 运行时拓扑
 
@@ -90,19 +88,20 @@ im-storage-mongodb ──> im-server ──> im-proto
 客户端 ──WS/TCP───> │ Netty(8081/9092) → 网关逻辑 → 本地直调 IM 服务    │
                     │ Tomcat(8080)     → REST / 测试页 / admin          │
                     └──────────────────────┬───────────────────────────┘
-                                           │ Redis（路由/离线/seq/幂等/消息）
+                                           │ Redis（路由/离线/seq/幂等）
+                                           │ MongoDB 或 MySQL（消息/群/关系链）
 ```
 
 **拆分部署**（网关与 IM 服务各自扩容）：
 
 ```
-客户端 ──WebSocket/TCP──> im-gateway ──gRPC MessageIngress.SubmitMessage──> im-server ──> Redis / MySQL
+客户端 ──WebSocket/TCP──> im-gateway ──gRPC MessageIngress.SubmitMessage──> im-server ──> MongoDB / MySQL
                              ↑                                                │
                              └────────── gRPC DownstreamPush.Push ────────────┘
 
 im-gateway ──写──> Redis(im:gateway:user:{userId} = SET{网关实例})
-im-server  ──读写──> Redis(im:conv:msgs / im:offline / im:seq / im:idem)（im.storage=jdbc 时消息落 MySQL，
-                                                                         =mongodb 时落 MongoDB 的 im_message）
+im-server  ──读写──> Redis(im:offline / im:seq / im:idem / 水位)  ← 热路径共享状态
+im-server  ──读写──> MongoDB 的 im_message（缺省）或 MySQL 的 im_message（im.storage=jdbc）
 ```
 
 ### 一条消息的完整链路
@@ -351,7 +350,7 @@ GET /conv/g:{groupId}/read-stat?userId=alice&seq=100&limit=100
   聚合 = 群成员列表 + 一次批量 `HGET`（pipeline 分批 500，万人群 10 批）。
   **没有新增 key、没有新增写放大**，也没多出第二份会不一致的真相；
 - **分母不含该消息的发送者**：「已读 3/3」比「已读 4/4」有用。发送者靠 `seq` 反查消息得到；
-  消息已被裁剪（Redis 形态只留最近 1000 条）时不排除——宁可分母大一号，也不要因为历史缺失
+  消息已被物理删除（或存储抖动）时不排除——宁可分母大一号，也不要因为一条历史缺失
   把整条消息的已读状态变空；
 - **计数全量、名单可截断**：`limit` 只影响 `members`（默认 100、上限 500），
   `readCount + unreadCount == total` 在任何 limit 下都成立；`members` 已读在前、
@@ -669,8 +668,8 @@ message accepted: traceId=trace-e2e-0001 conv=s:alice:bob seq=13 msgId=01a166bb-
 
 **大群的写扩散降级**：一条消息要把所有成员的 `im:user:convs` 都推一遍，10 万人群就是 10 万次 ZADD。
 超过 `im.conversation.fanout-limit`（默认 1000）人时**直接跳过写扩散**，只更新元信息，
-成员的会话列表靠 `im:group:user:{userId}` 反查在**读时**补齐。所以群成员存储多了个反向索引
-（Redis 版多维护一个 Set，JDBC 版直接走 `idx_group_member_user` 索引）。
+成员的会话列表靠反查「我加入了哪些群」在**读时**补齐，所以群成员存储需要反向索引
+（JDBC 走 `idx_group_member_user`，MongoDB 走 `idx_group_member_user` 二级索引）。
 
 **会话标记（置顶 / 免打扰）**：`im:user:convflags:{userId}`（Hash，`conversationId -> 位图`），
 第 0 位置顶、第 1 位免打扰。
@@ -703,22 +702,23 @@ POST /conv/{conversationId}/flag?userId=alice&muted=false            取消免�
 理由很实际——分片这件事一旦要加，最先出错的永远是「同一份数据在两处被算到不同分片」，
 而那种实现几乎总是各模块自己写 `Math.abs(id.hashCode()) % n`。
 
-**每个 key 只带两个 hash tag**（`RedisKeys` 是唯一构造点）：
+**Redis 里只剩两个维度的 key**（`RedisKeys` 是唯一构造点）：
 
 | 维度 | tag | key 形态 |
 |---|---|---|
-| 会话 | `{conversationId}` | `im:conv:{c}:meta` / `:msgs` / `:seq` / `:recalled` / `:idem:{from}\|{msgId}` |
+| 会话 | `{conversationId}` | `im:conv:{c}:meta` / `:seq` / `:recalled` / `:idem:{from}\|{msgId}` |
 | 用户 | `{userId}` | `im:user:{u}:convs` / `:read` / `:flags` / `:wm:{device}` / `:offline:*` / `:friends` … |
-| 群 | `{groupId}` | `im:group:{g}:members` / `:roles` / `:mutes` / `:join-req` / `:invites` |
-| 邀请码 | `{code}` | `im:invite:{code}`（tag 用码：扫码时手里只有码，必须一次定位到群） |
+
+消息体、群资料 / 成员 / 角色 / 禁言、入群申请与邀请码都**不再有 Redis key**：它们是持久化真相，
+按 `im.storage` 落 MongoDB 或 MySQL；对应的分类维度（`{groupId}` / `{code}`）随之从 key 空间里消失。
 
 **这次改造修掉了一个真实缺陷**：改造前 `im:seq:{c}` 与 `im:idem:{from}|{msgId}` 都没有 tag，
 而 `SeqAllocator` 的「幂等查询 + 发号」合并脚本同时访问这两个 key —— 在 Redis Cluster 上
 会直接 `CROSSSLOT` 失败（单机 Redis 无感，所以一直没暴露）。现在幂等键挂在会话维度上
 （`im:conv:{c}:idem:...`），与 seq 计数器天然同 slot。
 
-同 slot 带来的结构性收益：`meta + msgs + seq + recalled` 现在可以放进**同一个 Lua**，
-将来把「受理一条消息」（取号 → 追加 → 更新 meta）合并成一次往返，而不用改 key 设计。
+同 slot 带来的结构性收益：`meta + seq + recalled` 现在可以放进**同一个 Lua**，
+将来把「受理一条消息」（取号 → 更新 meta → 记撤回）合并成一次往返，而不用改 key 设计。
 
 **租户维度**用进程级根前缀（`im.tenant.app-id`，默认空 → `im:`）：
 
@@ -835,11 +835,10 @@ List<StoredMessage> since(String conversationId, long afterSeq, int limit);
 long maxSeq(String conversationId);
 ```
 
-落库的是**结构化记录**（不是已序列化好的下行帧），帧在读取时按需重建。三种实现：
+落库的是**结构化记录**（不是已序列化好的下行帧），帧在读取时按需重建。两种实现：
 
 | 实现 | 位置 | 介质 | 适用 |
 |------|------|------|------|
-| `RedisMessageRepository` | `im-storage-redis`（默认） | `im:conv:msgs:{conversationId}` List，JSON | 本地开发 / 联调，零外部数据库 |
 | `JdbcMessageRepository` | `im-storage-jdbc` | MySQL `im_message` | 生产形态，支持按会话 + 序号漫游 |
 | `MongoMessageRepository` | `im-storage-mongodb` | MongoDB `im_message`，实体 `MessageEntity`，`_id = serverMsgId` | 文档形态，身份用 UUIDv7，`(conversationId, seq)` 唯一索引兜住保序与去重 |
 
@@ -847,7 +846,7 @@ long maxSeq(String conversationId);
 
 ```yaml
 im:
-  storage: jdbc            # redis（默认）| jdbc | mongodb
+  storage: jdbc            # mongodb（默认）| jdbc
   db:
     # rewriteBatchedStatements=true：驱动把批量插入压成一条多值 INSERT，省 round trip
     url: jdbc:mysql://127.0.0.1:3306/im-cluster?useSSL=false&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true
@@ -1030,8 +1029,8 @@ CREATE TABLE im_group_member (
 群聊扇出 = 群成员列表去掉发送者；成员列表为空时**当成无人可投**，绝不退化成「投给群 ID」
 （那会往离线队列塞进永远不被拉取的数据）。
 
-除了正查（群 → 成员）还有**反查**（用户 → 群，`groupsOf`）：Redis 形态多维护一个
-`im:group:user:{userId}` Set（写入/移除成员时两边一起改），JDBC 形态直接走 `idx_group_member_user` 索引。
+除了正查（群 → 成员）还有**反查**（用户 → 群，`groupsOf`）：JDBC / MongoDB 形态都直接走
+`idx_group_member_user` 二级索引，不需要额外维护一份反向集合。
 反查的用途是**大群会话列表的补齐**——群消息的会话列表是写扩散的，超过 `im.conversation.fanout-limit`
 会跳过写扩散，成员的列表只能靠反查在读时补出来。少了它，大群成员「明明在群里却看不到会话」。
 退群时两边必须一起摘，否则退群的人会一直看到那个群。
@@ -1331,11 +1330,10 @@ IM_GRPC_PORT=9090 IM_GRPC_HOST=127.0.0.1 \
 | 模块 | 用例 | 依赖 |
 |---|---|---|
 | `im-server` | `SeqAllocatorTest`（冷启动 / 客户端水位 / Redis 回退到旧快照 / 多实例顺序 / 8 线程并发 / DB 下界查询摊薄）、`MessageHistoryPagingTest`（翻页不重不漏 / 整页被删游标仍前进 / limit 夹取） | **真实 Redis**（`MessageHistoryPagingTest` 除外） |
-| `im-storage-redis` | `RedisMessageRepositoryTest`（落库乱序时 `maxSeq` 仍取真正最大值；`before` 按 seq 而非物理顺序切片）、`RedisStorageConfigTest`（`im.storage` 缺省落 Redis、配 `jdbc` 时本模块不建 Bean） | **真实 Redis**（配置测试除外） |
 | `im-storage-mongodb` | `MongoEntityMappingTest`（模型 ↔ 实体无损往返、`_id` 语义、索引注解解析出的名字与唯一性）、`MongoQueryMappingTest`（`id`/`serverMsgId` → `_id` 的查询与更新映射、`from`/`recalledAt` 等字段不被改名）、`MongoStorageConfigTest`（`im.storage=mongodb` 才装配四个端口、宿主已有客户端时不重复创建、其它形态下一律不建）、`MongoSchemaIndexTest`（复现「遗留 `uk_msg_server_id` 导致第二条消息撞 `dup key: null`」，并验证启动收敛会删掉它）、`MongoMessageRepositoryPagingTest`（`before` 的 seq 排他 / 升序 / 跨会话隔离） | 前三个不需要 Mongo；后两个要真实 Mongo（连不上自动跳过） |
 | `im-rpc` | `GrpcChannelFactoryHealthTest`（NOT_SERVING 实例被摘出轮询、无健康服务的对端仍可用、waitForReady 等到 deadline、关开关回到旧行为） | 真实 gRPC 服务端（进程内起） |
 | `im-gateway` | `HmacTokenAuthenticatorTest`（越权冒用 / 过期 / 篡改过期时间 / 换密钥伪造 / 格式错误）、`AuthGuardTest`（off 全放行、warn 只记录不误伤、enforce 拒绝、缺 secret 启动失败）、`SerialExecutorTest`（串行 / 保序 / 高水位暂停只触发一次且不丢帧 / 低水位才恢复 / 未到阈值不触发 / 控制任务不参与背压 / 指标监听收到暂停+恢复 / 单任务异常不中断） | 无 |
-| `im-server-boot` | `GrpcHealthEndpointTest`（健康服务确实被绑定且最终 SERVING）、`ImServerApplicationScanTest`（三种介质的包都在扫描白名单里）、`StorageWiringTest`（`im.storage=redis` 时装配 Redis 实现，且不建 DataSource / MongoClient / MongoTemplate；两个上下文用例都显式钉住 `im.storage=redis`，不跟随部署侧默认值） | Spring 上下文 + Redis |
+| `im-server-boot` | `GrpcHealthEndpointTest`（健康服务确实被绑定且最终 SERVING）、`ImServerApplicationScanTest`（jdbc / mongodb 的包都在扫描白名单里，且不含已删除的 `storage.redis`）、`StorageWiringTest`（未选中介质时不建 DataSource / MongoClient / MongoTemplate、每个端口恰好一个 Bean；两个上下文用例都显式钉住 `im.storage=none` + 存储替身，不跟随部署侧默认值） | Spring 上下文（存储用替身，不依赖外部数据库） |
 
 Redis 相关用例默认连 `127.0.0.1:6379`（可用 `-Dim.test.redis.host=... -Dim.test.redis.port=...` 改），
 要验证的正是 Lua 的原子性和下界保护，把 Redis mock 掉就等于把最该测的部分测丢了。
@@ -1413,7 +1411,7 @@ kubectl apply -f k8s/im-node.yaml     # 或 im-gateway.yaml + im-server.yaml（�
 
 | 配置 | 环境变量 | 默认 | 说明 |
 |------|----------|------|------|
-| `im.storage` | `IM_STORAGE` | `redis` | `redis` / `jdbc` / `mongodb` |
+| `im.storage` | `IM_STORAGE` | `mongodb` | `mongodb` / `jdbc`（Redis 已不再是存储形态；它仍被需要，但只承载热路径共享状态） |
 | `im.db.url` | `IM_DB_URL` | 空 | 仅 `jdbc` 时读取 |
 | `im.db.username` / `password` | `IM_DB_USERNAME` / `IM_DB_PASSWORD` | `root` / 空 | |
 | `im.db.pool-size` | `IM_DB_POOL_SIZE` | `20` | Hikari 连接池 |
@@ -1487,15 +1485,9 @@ kubectl apply -f k8s/im-node.yaml     # 或 im-gateway.yaml + im-server.yaml（�
 | `im:wm:{userId}:{deviceId}` (Hash) | IM 服务 | IM 服务（客户端亲口确认的已见 seq，delivered 口径，30d TTL） |
 | `im:user:{userId}:replay:{deviceId}` (String) | IM 服务（网关 ack 驱动） | IM 服务（这台设备已回过放；存在性即语义，30d TTL） |
 | `im:offline:{userId}` (List) | — | **已废弃**，升级窗口内读一次把积压帧发掉 |
-| `im:conv:msgs:{conversationId}` | IM 服务（`im.storage=redis`） | IM 服务 |
-| `im:seq:{conversationId}` | IM 服务 | IM 服务 |
+| `im:seq:{conversationId}` | IM 服务 | IM 服务（会话内发号） |
 | `im:idem:{from}\|{clientMsgId}` | IM 服务 | IM 服务 |
-| `im:group:members:{groupId}` | IM 服务（`im.storage=redis`） | IM 服务（群聊扇出） |
 | `im:group:{groupId}:roles` / `:mutes` | IM 服务 | IM 服务（角色与禁言；roles 只存非 MEMBER） |
-| `im:group:{groupId}:join-req` (Hash) | IM 服务 | IM 服务（待审入群申请，默认 7d TTL） |
-| `im:group:{groupId}:invites` (Set) | IM 服务 | IM 服务（该群放出去的邀请码，只做列出/吊销索引） |
-| `im:invite:{code}` (Hash) | IM 服务 | IM 服务（邀请码本体；`uses` 由 Lua 原子自增） |
-| `im:group:user:{userId}` (SET) | IM 服务（`im.storage=redis`） | IM 服务（反查「我加入了哪些群」，大群会话列表补齐） |
 | `im:conv:meta:{convId}` (Hash) | IM 服务 | IM 服务（会话元信息：last_seq / last_time / 最后一条摘要） |
 | `im:user:convs:{userId}` (ZSet) | IM 服务 | IM 服务（会话列表，score = 最后消息时间） |
 | `im:user:read:{userId}` (Hash) | IM 服务 | IM 服务（**用户级**已读位置，多端共用） |
@@ -1589,13 +1581,6 @@ im-cluster/
 │   ├── grpc/MessageIngressGrpcService.java   # @GrpcService：供远程网关上行
 │   └── controller/                           # /send、/conv/{conversationId}/messages、/group/...
 │
-├── im-storage-redis/            # 存储实现插件（Redis，缺省形态）
-│   ├── RedisStorageConfig.java               # 条件装配：im.storage=redis 或未配置（四个端口一起）
-│   ├── RedisMessageRepository.java           # List 存 JSON + 撤回/删除用 Set
-│   ├── RedisGroupRepository.java             # 群资料 Hash（单字段改，避免并发覆盖）
-│   ├── RedisGroupMemberRepository.java       # 群成员 Set + 反向索引 + 角色/禁言
-│   ├── RedisRelationRepository.java          # 好友双向两份 / 黑名单单向
-│   └── RedisFriendRequestRepository.java     # 收到的/发出的各一个 Hash，value 是申请单 JSON
 │
 ├── im-storage-jdbc/             # 存储实现插件（MySQL）
 │   ├── JdbcStorageConfig.java                # 条件装配：仅 im.storage=jdbc

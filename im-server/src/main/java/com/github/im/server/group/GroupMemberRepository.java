@@ -10,8 +10,8 @@ import java.util.Map;
 /**
  * 群成员存储端口（IM 服务独占）。
  *
- * <p>与 {@code MessageRepository} 同一套切换策略：默认 Redis（{@code im:group:members:{groupId}}，
- * 零外部依赖），{@code im.storage=jdbc} 时切到 MySQL 的 {@code im_group_member} 表。
+ * <p>与 {@code MessageRepository} 同一套切换策略：由 {@code im.storage} 二选一装配，
+ * 落 MySQL 的 {@code im_group_member} 表（{@code jdbc}）或 Mongo 的成员集合（{@code mongodb}，缺省）。
  * 业务侧（群聊扇出）只依赖 {@link #membersOf}，不感知存储介质。
  *
  * <p><b>为什么不缓存</b>：群成员是扇出的权威来源，缓存与库不一致会直接表现为「有人收不到消息」。
@@ -43,9 +43,9 @@ public interface GroupMemberRepository {
      * 客户端拿到 5000 条才切页——既浪费带宽，也让服务端每次都做一次 O(N) 序列化。
      *
      * <p><b>为什么按 userId 字典序</b>：offset 分页要求顺序稳定，否则翻页会重复/漏人。
-     * Redis 的 Set 本身无序，按 userId 排序是唯一不需要额外存储（不需要再维护一个
-     * 加入时间的有序结构）的稳定顺序。代价是「管理员不会自动排在第一页」——那需要
-     * 另一种「角色优先」的列表设计，不在这里混。
+     * 成员集合本身无序（Set 语义 / 不带 ORDER BY 的查询），按 userId 排序是唯一不需要
+     * 额外存储（不需要再维护一个按加入时间的有序结构）的稳定顺序。代价是「管理员不会
+     * 自动排在第一页」——那需要另一种「角色优先」的列表设计，不在这里混。
      *
      * @param offset 从 0 开始；负数按 0 处理
      * @param limit  {@code <= 0} 表示「取到末尾」
@@ -65,7 +65,7 @@ public interface GroupMemberRepository {
      * 成员数。
      *
      * <p>存在理由是「拉人前要判人数上限」：那件事只需要一个数字，此前却要拉全量成员。
-     * 默认实现退回 {@link #membersOf}，Redis 实现覆盖成 {@code SCARD}（O(1)）。
+     * 默认实现退回 {@link #membersOf}，两个存储实现都覆盖成一次计数查询。
      */
     default long memberCount(String groupId) {
         return membersOf(groupId).size();
@@ -75,7 +75,7 @@ public interface GroupMemberRepository {
      * 批量取禁言到期时间（成员列表渲染用）。
      *
      * <p>默认实现逐个 {@link #mutedUntil}：N 个成员就是 N 次往返。5000 人群的成员列表此前
-     * 正是栽在这里——接口本身没分页，还叠加了 N+1 查询。Redis 实现覆盖成一次 {@code HGETALL}。
+     * 正是栽在这里——接口本身没分页，还叠加了 N+1 查询。两个存储实现都覆盖成一次批量查询。
      *
      * @return userId → 仍在禁言期内的到期时间（已过期的不出现在结果里）
      */
@@ -106,8 +106,8 @@ public interface GroupMemberRepository {
      * 某用户是否在这个群里（<b>发言准入</b>用）。
      *
      * <p>默认实现退回 {@link #membersOf}，正确性没问题，但代价是**每次群消息都要拉全量成员**：
-     * 一个万人群，每条消息都是一次 1 万成员的 SMEMBERS。所以两个实现都覆盖成 O(1)
-     * （Redis {@code SISMEMBER}、JDBC 走 {@code uk_group_member} 唯一键的存在性查询）。
+     * 一个万人群，每条消息都是一次一万行的查询。所以两个实现都覆盖成一次存在性查询
+     * （JDBC 走 {@code uk_group_member} 唯一键，Mongo 走 groupId + userId 的复合索引）。
      *
      * <p>注意它和 {@link #membersOf} 的分工：这个只回答「能不能发」，扇出仍然要全量成员。
      */
@@ -135,8 +135,8 @@ public interface GroupMemberRepository {
      * <p>{@link #rolesOf(String)} 是「这个群的全部角色」，它内部要先拉全量成员再回填 MEMBER——
      * 为了一页 50 个人去构造一张 5000 项的 map 是白费力气。这里只回答「这些人各是什么角色」。
      *
-     * <p>默认实现逐个 {@link #roleOf}（N 次往返）；Redis 实现覆盖成一次 {@code HMGET}，
-     * 因为角色 Hash 里只有非 MEMBER 的条目（通常个位数）。
+     * <p>默认实现逐个 {@link #roleOf}（N 次往返）；两个存储实现都覆盖成一次批量查询
+     * （{@code WHERE user_id IN (...)} / {@code $in}）。
      *
      * @return 入参里那些<b>是成员</b>的人；非成员不会出现在结果里（与 {@link #roleOf} 的 null 语义一致）
      */

@@ -41,7 +41,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * 500 人群里 450 人不在线、50 人各发 5 条，就是 250 × 450 = 112,500 份相同帧（~30MB），
  * 而且会随消息数线性增长。改成指针后，每个「用户 × 会话」只占一个 field（几十字节），
  * 后续消息只把同一个 field 往前推——<b>占用不随消息数增长</b>，帧在补发时由
- * {@link ClientFrames#frameOf} 从 {@code im:conv:msgs:{conv}} / {@code im_message} 重建。
+ * {@link ClientFrames#frameOf} 从业务库（{@code im_message}）重建。
  *
  * <h2>补发是「至少一次」，不是「读即消费」</h2>
  *

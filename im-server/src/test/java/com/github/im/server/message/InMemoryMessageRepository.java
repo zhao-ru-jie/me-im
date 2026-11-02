@@ -12,13 +12,13 @@ import java.util.concurrent.ConcurrentSkipListMap;
 /**
  * 测试用的内存版消息存储：只保证 {@link MessageRepository} 的<b>语义</b>，不模拟任何介质。
  *
- * <p>为什么需要它：Redis 实现已搬到 im-storage-redis，而 im-server 的测试<b>不能</b>反向依赖那个模块
- * （im-storage-redis → im-server 是编译依赖，再加一条 test 依赖就构成 reactor 环，Maven 直接报
- * cyclic reference）。于是 im-server 侧的用例自带一个最简实现，需要验证介质行为时去
- * im-storage-redis 自己的测试里测。
+ * <p>为什么需要它：真实实现在 im-storage-jdbc / im-storage-mongodb，而 im-server 的测试<b>不能</b>
+ * 反向依赖那些模块（它们是 im-server 的编译下游，再加一条 test 依赖就构成 reactor 环，
+ * Maven 直接报 cyclic reference）。于是 im-server 侧的用例自带一个最简实现，
+ * 需要验证介质行为时去各 storage 模块自己的测试里测。
  *
- * <p>按 {@code seq} 排序（与 jdbc 形态的 {@code ORDER BY seq} 一致），而不是 Redis 形态的
- * 「append 顺序」——测试断言的是业务语义，不该被落库顺序影响。
+ * <p>按 {@code seq} 排序（与两个真实实现的 {@code ORDER BY seq} / 复合索引升序一致）——
+ * 测试断言的是业务语义，不该被落库顺序影响。
  */
 final class InMemoryMessageRepository implements MessageRepository {
 

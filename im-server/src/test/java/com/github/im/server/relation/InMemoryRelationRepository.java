@@ -11,8 +11,8 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * 测试用的内存版关系链存储：只保证 {@link RelationRepository} 的语义，不模拟介质。
  *
- * <p>为什么需要它：Redis 实现已搬到 im-storage-redis，而 im-server 的测试不能反向依赖那个模块
- * （im-storage-redis → im-server 是编译依赖，再加 test 依赖就构成 reactor 环）。
+ * <p>为什么需要它：真实实现在 im-storage-jdbc / im-storage-mongodb，而 im-server 的测试
+ * 不能反向依赖那些模块（它们是 im-server 的下游，会构成 reactor 环）。
  * 这里刻意复刻两处容易做错的语义：
  * <ul>
  *   <li><b>好友双向</b>：{@code areFriends} 要求两边互为好友，只写一边必须判否；</li>

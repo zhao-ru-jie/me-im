@@ -2,6 +2,8 @@ package com.github.im.storage.mongodb;
 
 import com.github.im.storage.mongodb.entity.FriendRequestEntity;
 import com.github.im.storage.mongodb.entity.GroupEntity;
+import com.github.im.storage.mongodb.entity.GroupInviteEntity;
+import com.github.im.storage.mongodb.entity.GroupJoinRequestEntity;
 import com.github.im.storage.mongodb.entity.GroupMemberEntity;
 import com.github.im.storage.mongodb.entity.MessageDeleteEntity;
 import com.github.im.storage.mongodb.entity.MessageEntity;
@@ -58,6 +60,8 @@ public final class MongoSchema {
             MessageDeleteEntity.class,
             GroupEntity.class,
             GroupMemberEntity.class,
+            GroupJoinRequestEntity.class,
+            GroupInviteEntity.class,
             RelationEntity.class,
             FriendRequestEntity.class);
 

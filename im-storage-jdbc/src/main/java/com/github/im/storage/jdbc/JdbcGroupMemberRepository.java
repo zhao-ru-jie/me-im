@@ -17,9 +17,10 @@ import java.util.Map;
  *
  * <p>表结构见 {@code db/schema.sql} 的 {@code im_group_member}：
  * {@code uk_group_member (group_id, user_id)} 保证加成员幂等，
- * {@code idx_group_member_user (user_id)} 支撑「某用户加入了哪些群」的反查（Redis Set 做不到这一点）。
+ * {@code idx_group_member_user (user_id)} 支撑「某用户加入了哪些群」的反查
+ * （没有二级索引的 KV 存储就得自己再维护一份反向 Set）。
  *
- * <p>与 Redis 版的行为差异：这里第一版统一写 {@code role=MEMBER}。角色（OWNER/ADMIN）留给
+ * <p>角色约定：这里第一版统一写 {@code role=MEMBER}。角色（OWNER/ADMIN）留给
  * 群管理接口引入，不在此处凭空发明默认群主——扇出只关心「谁在群里」。
  *
  * @author zhaorujie
@@ -92,8 +93,8 @@ public class JdbcGroupMemberRepository implements GroupMemberRepository {
     /**
      * 反查「某用户加入了哪些群」，走 {@code idx_group_member_user (user_id)}。
      *
-     * <p>这正是 JDBC 形态比 Redis 形态强的地方：Redis 版必须额外维护
-     * {@code im:group:user:{userId}} 这个反向 Set 才能做到同一件事。
+     * <p>这是关系库相对 KV 的天然优势：不必额外维护一份「用户 → 群」的反向 Set，
+     * 也就不存在「正向写完、反向没同步」这类双写不一致。
      */
     @Override
     public GroupRole roleOf(String groupId, String userId) {

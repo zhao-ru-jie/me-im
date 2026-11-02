@@ -15,8 +15,8 @@ import org.springframework.data.mongodb.core.mapping.MongoId;
  * 被踢掉的管理员重新加群时直接带着管理员权限。
  *
  * <p>{@code userId} 上有单列索引，所以「我加入了哪些群」是一次普通二级查询。
- * Redis 形态必须额外维护 {@code im:group:user:{userId}} 这个反向 Set，是因为它没有二级索引；
- * 这里不该再引入一份需要双写的一致性负担。
+ * 没有二级索引的 KV 存储只能额外维护一份反向 Set，那就多出一份需要双写的一致性负担；
+ * 这里刻意不引入。
  *
  * @author zhaorujie
  * @since 1.0.0

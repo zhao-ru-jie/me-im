@@ -24,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 群治理规则的约定。
  *
  * <p>两个存储端口换成内存实现，因此<b>不需要 Redis/MySQL</b>：这里要锁的是「谁能做什么」，
- * 而不是 Redis 键长什么样——后者属于 {@code RedisGroupMemberRepository} 自己的关注点。
+ * 而不是键长什么样——后者属于各介质实现（jdbc / mongodb）自己的关注点。
  *
  * <p>用例一一对应 {@link GroupService} 里那五条不可让步的规则：
  * <ol>
@@ -541,7 +541,7 @@ class GroupServiceTest {
     /**
      * 内存版成员存储。
      *
-     * <p>刻意复刻 {@code RedisGroupMemberRepository} 的两处语义：非成员的角色是 {@code null}
+     * <p>刻意复刻各介质实现的同一组语义：非成员的角色是 {@code null}
      * （而不是 MEMBER），以及移出成员时角色与禁言一起清——后者漏了就会出现
      * 「被踢掉的管理员再加回来直接带着管理员权限」这条越权路径。
      */
@@ -655,7 +655,7 @@ class GroupServiceTest {
     /**
      * 内存版入群存储。
      *
-     * <p>复刻 {@code RedisGroupJoinStore} 的两处关键语义：申请按 {@code (groupId, applicantId)}
+     * <p>复刻 {@code GroupJoinStore} 实现的两处关键语义：申请按 {@code (groupId, applicantId)}
      * 覆盖（同一人只有一条）、邀请码取用<b>先判后增</b>（限量码用满即拒）。
      */
     private static final class InMemoryGroupJoinStore implements GroupJoinStore {

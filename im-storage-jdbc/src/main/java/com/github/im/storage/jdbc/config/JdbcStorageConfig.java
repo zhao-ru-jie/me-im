@@ -1,6 +1,7 @@
 package com.github.im.storage.jdbc.config;
 
 import com.baomidou.mybatisplus.autoconfigure.ConfigurationCustomizer;
+import com.github.im.server.group.GroupJoinStore;
 import com.github.im.server.group.GroupMemberRepository;
 import com.github.im.server.group.GroupRepository;
 import com.github.im.server.relation.FriendRequestRepository;
@@ -8,11 +9,14 @@ import com.github.im.server.relation.RelationRepository;
 import com.github.im.server.shard.ShardRouter;
 import com.github.im.server.message.MessageRepository;
 import com.github.im.storage.jdbc.JdbcFriendRequestRepository;
+import com.github.im.storage.jdbc.JdbcGroupJoinStore;
 import com.github.im.storage.jdbc.JdbcGroupMemberRepository;
 import com.github.im.storage.jdbc.JdbcGroupRepository;
 import com.github.im.storage.jdbc.JdbcMessageRepository;
 import com.github.im.storage.jdbc.JdbcRelationRepository;
 import com.github.im.storage.jdbc.mapper.FriendRequestMapper;
+import com.github.im.storage.jdbc.mapper.GroupInviteMapper;
+import com.github.im.storage.jdbc.mapper.GroupJoinRequestMapper;
 import com.github.im.storage.jdbc.mapper.GroupMemberMapper;
 import com.github.im.storage.jdbc.mapper.GroupMapper;
 import com.github.im.storage.jdbc.mapper.MessageDeleteMapper;
@@ -32,19 +36,20 @@ import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 
 import javax.sql.DataSource;
+import java.time.Duration;
 
 /**
  * MySQL 存储的手工装配（`im.storage=jdbc` 时生效），持久层用 MyBatis-Plus。
  *
  * <p>为什么不用 {@code spring-boot-starter-jdbc} 的自动装配：它会在<b>没有任何 DSN</b> 的情况下
- * 也去自动装配 DataSource，导致「只想用 Redis 的部署」启动失败。这里保持显式条件装配：
- * 没配 {@code im.storage=jdbc} 就完全不碰数据库，三种形态（redis / jdbc / mongodb）可以在同一份 jar 里共存。
+ * 也去自动装配 DataSource，导致「选 mongodb 的部署」启动失败。这里保持显式条件装配：
+ * 没配 {@code im.storage=jdbc} 就完全不碰数据库，两种形态（jdbc / mongodb）在同一份 jar 里共存。
  * 那个「classpath 上有就生效」的连通性负担由部署入口的 {@code spring.autoconfigure.exclude} 关掉，
  * 见 im-server-boot / im-app 的 application.yml。
  *
  * <p>MyBatis-Plus 的自动装配（{@code MybatisPlusAutoConfiguration}）是
  * {@code @ConditionalOnSingleCandidate(DataSource.class)}，同样只在 {@link #imDataSource} 存在时生效，
- * 所以 redis 形态下不会凭空多出 SqlSessionFactory 之类的 Bean。两个需要在这里显式声明的是：
+ * 所以非 jdbc 形态下不会凭空多出 SqlSessionFactory 之类的 Bean。两个需要在这里显式声明的是：
  * <ul>
  *   <li>{@link MapperScan}：Mapper 在 {@code com.github.im.storage.jdbc.mapper} 下，
  *       不在部署入口的 {@code @SpringBootApplication} 包内（Boot 的自动扫描只覆盖入口包）；
@@ -64,9 +69,11 @@ import javax.sql.DataSource;
  * im.db.batch-enabled=true  # group commit：把并发到达的插入合并成一个事务（默认开）
  * </pre>
  *
- * <p>本类同时提供两个存储端口的 MySQL 实现：{@code MessageRepository}（im_message）与
- * {@code GroupMemberRepository}（im_group_member）。两者共用同一个连接池，
- * 保证「消息落库 + 群成员变更」在同一个事务边界内可用。
+ * <p>本类提供<b>全部</b>存储端口的 MySQL 实现：{@code MessageRepository}（im_message）、
+ * {@code GroupMemberRepository}（im_group_member）、{@code GroupRepository}（im_group）、
+ * {@code RelationRepository}（im_relation）、{@code FriendRequestRepository}（im_friend_request）、
+ * {@code GroupJoinStore}（im_group_join_request / im_group_invite）。
+ * 它们共用同一个连接池，保证「消息落库 + 群成员变更」在同一个事务边界内可用。
  *
  * @author zhaorujie
  * @since 1.0.0
@@ -133,14 +140,14 @@ public class JdbcStorageConfig {
         return new JdbcGroupMemberRepository(groupMemberMapper);
     }
 
-    /** 群实体（群资料 + 群级开关）；Redis 形态下由 {@code RedisGroupRepository} 提供 */
+    /** 群实体（群资料 + 群级开关）；另一个实现是 {@code MongoGroupRepository} */
     @Bean
     public GroupRepository groupRepository(GroupMapper groupMapper) {
         return new JdbcGroupRepository(groupMapper);
     }
 
     /**
-     * 关系链（好友 / 黑名单）。Redis 形态下由 {@code RedisRelationRepository} 提供，
+     * 关系链（好友 / 黑名单）。另一个实现是 {@code MongoRelationRepository}，
      * 两者都实现同一端口，业务侧（{@code MessageAcl}）不感知介质。
      */
     @Bean
@@ -158,5 +165,37 @@ public class JdbcStorageConfig {
     @Bean
     public FriendRequestRepository friendRequestRepository(FriendRequestMapper friendRequestMapper) {
         return new JdbcFriendRequestRepository(friendRequestMapper);
+    }
+
+    /**
+     * 入群申请与邀请码。
+     *
+     * <p>这一组数据决定「谁能进这个群」，所以跟着 {@code im.storage} 落到业务库：
+     * 放在共享的 Redis 上意味着它和「7 天后自然过期」共用一条故障链，
+     * 而主从切换丢掉的审批状态、被重置的限量计数都是不可解释的业务事故。
+     * 两个 TTL 参数保留原有的业务语义（申请存活期、长期码的兜底上限）。
+     */
+    @Bean
+    public GroupJoinStore groupJoinStore(GroupJoinRequestMapper requestMapper,
+                                         GroupInviteMapper inviteMapper,
+                                         @Value("${im.group.join-request-ttl:7d}") String requestTtl,
+                                         @Value("${im.group.invite-ttl:30d}") String inviteTtl) {
+        // 手写解析而不是直接注入 Duration：「字符串 -> Duration」的转换器来自 Boot 的
+        // ConversionService，而本配置类也会被非 Boot 上下文加载（装配测试）。
+        return new JdbcGroupJoinStore(requestMapper, inviteMapper,
+                parseDuration(requestTtl, Duration.ofDays(7)),
+                parseDuration(inviteTtl, Duration.ofDays(30)));
+    }
+
+    /** 支持 {@code 7d} 这类短写与 ISO-8601；非法值退回默认，不让配置写错阻断启动 */
+    private static Duration parseDuration(String value, Duration fallback) {
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        try {
+            return org.springframework.boot.convert.DurationStyle.detectAndParse(value.trim());
+        } catch (RuntimeException e) {
+            return fallback;
+        }
     }
 }

@@ -6,6 +6,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -31,13 +32,20 @@ class ImServerApplicationScanTest {
 
         assertTrue(packages.contains("com.github.im.server"),
                 "IM 服务包必须被扫描，实际：" + packages);
-        assertTrue(packages.contains("com.github.im.storage.redis"),
-                "少了 com.github.im.storage.redis：im.storage=redis（或缺省）时会报 MessageRepository 找不到，实际：" + packages);
         assertTrue(packages.contains("com.github.im.storage.jdbc"),
                 "少了 com.github.im.storage.jdbc：im.storage=jdbc 时会报 MessageRepository 找不到，实际：" + packages);
         assertTrue(packages.contains("com.github.im.storage.mongodb"),
-                "少了 com.github.im.storage.mongodb：im.storage=mongodb 时会报 MessageRepository 找不到，实际：" + packages);
+                "少了 com.github.im.storage.mongodb：im.storage=mongodb（缺省）时会报 MessageRepository 找不到，实际：" + packages);
         assertTrue(packages.contains("com.github.im.serverboot"),
                 "入口自己的包（本地装配类 / 健康检查）也必须被扫描，实际：" + packages);
+    }
+
+    @Test
+    @DisplayName("Redis 形态的存储实现已移除：扫描白名单里不该再出现它")
+    void doesNotScanRemovedRedisStoragePackage() {
+        List<String> packages = scannedPackages();
+
+        assertFalse(packages.contains("com.github.im.storage.redis"),
+                "im-storage-redis 已从项目移除，扫描残留会让启动报 ClassNotFound / 空扫描，实际：" + packages);
     }
 }

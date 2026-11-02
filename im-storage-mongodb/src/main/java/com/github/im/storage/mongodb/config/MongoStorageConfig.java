@@ -1,11 +1,12 @@
 package com.github.im.storage.mongodb.config;
 
 import com.github.im.server.group.GroupMemberRepository;
-import com.github.im.server.group.GroupRepository;
+import com.github.im.server.group.GroupJoinStore;import com.github.im.server.group.GroupRepository;
 import com.github.im.server.message.MessageRepository;
 import com.github.im.server.relation.FriendRequestRepository;
 import com.github.im.server.relation.RelationRepository;
 import com.github.im.storage.mongodb.MongoFriendRequestRepository;
+import com.github.im.storage.mongodb.MongoGroupJoinStore;
 import com.github.im.storage.mongodb.MongoGroupMemberRepository;
 import com.github.im.storage.mongodb.MongoGroupRepository;
 import com.github.im.storage.mongodb.MongoMessageRepository;
@@ -25,6 +26,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
+import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -227,5 +229,34 @@ public class MongoStorageConfig {
     @Bean
     public FriendRequestRepository friendRequestRepository(MongoTemplate mongoTemplate) {
         return new MongoFriendRequestRepository(mongoTemplate);
+    }
+
+    /**
+     * 入群申请与邀请码。
+     *
+     * <p>决定「谁能进这个群」的状态不放在共享 Redis 上（见 {@code JdbcGroupJoinStore} 的说明）；
+     * 两个 TTL 参数保留原有业务语义：申请存活期、长期码的兜底上限。
+     */
+    @Bean
+    public GroupJoinStore groupJoinStore(MongoTemplate mongoTemplate,
+                                         @Value("${im.group.join-request-ttl:7d}") String requestTtl,
+                                         @Value("${im.group.invite-ttl:30d}") String inviteTtl) {
+        // 手写解析而不是直接注入 Duration：本配置类也会被非 Boot 上下文加载（例如装配测试），
+        // 而「字符串 -> Duration」的转换器由 Boot 的 ConversionService 提供，那里没有。
+        return new MongoGroupJoinStore(mongoTemplate,
+                parseDuration(requestTtl, Duration.ofDays(7)),
+                parseDuration(inviteTtl, Duration.ofDays(30)));
+    }
+
+    /** 支持 {@code 7d} 这类短写与 ISO-8601；非法值退回默认，不让配置写错阻断启动 */
+    private static Duration parseDuration(String value, Duration fallback) {
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        try {
+            return org.springframework.boot.convert.DurationStyle.detectAndParse(value.trim());
+        } catch (RuntimeException e) {
+            return fallback;
+        }
     }
 }

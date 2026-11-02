@@ -1,7 +1,6 @@
 package com.github.im.storage.jdbc;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
-import com.github.im.contract.RedisKeys;
 import com.github.im.server.message.MessageRepository;
 import com.github.im.server.message.StoredMessage;
 import com.github.im.server.shard.ShardRouter;
@@ -68,12 +67,10 @@ public class JdbcMessageRepository implements MessageRepository, AutoCloseable {
     @Override
     public void append(StoredMessage message) {
         if (log.isDebugEnabled() && shardRouter != null) {
-            // 分片号在这里落脚：排查「同一会话的数据为什么分散在不同片」时，
-            // 这一行同时给出 MySQL 分片与 Redis key（两者必须按同一个 conversationId 切）
-            log.debug("[shard] conv={} seq={} mysql={} redis={}",
+            // 分片号在这里落脚：排查「同一会话的数据为什么分散在不同片」时，这一行直接给出落点表
+            log.debug("[shard] conv={} seq={} table={}",
                     message.conversationId(), message.seq(),
-                    shardRouter.messageTableOf(message.conversationId()),
-                    RedisKeys.convMessages(message.conversationId()));
+                    shardRouter.messageTableOf(message.conversationId()));
         }
         appender.append(message);
     }

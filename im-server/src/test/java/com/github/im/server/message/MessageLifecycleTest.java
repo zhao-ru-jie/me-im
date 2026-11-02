@@ -84,7 +84,6 @@ class MessageLifecycleTest {
         }
         StringRedisTemplate redis = TestRedis.template();
         for (String conversationId : conversationIds) {
-            redis.delete(RedisKeys.convMessages(conversationId));
             redis.delete(RedisKeys.convMeta(conversationId));
             redis.delete(RedisKeys.convRecalled(conversationId));
             for (String userId : userIds) {
@@ -226,9 +225,9 @@ class MessageLifecycleTest {
     // ==== 辅助 ====
 
     /**
-     * 存储用内存替身：Redis 实现已搬到 im-storage-redis，im-server 的测试不能反向依赖它
-     * （会构成 reactor 环）。本类要验的是「撤回/删除在读写路径上的语义」，与介质无关；
-     * 介质行为由 im-storage-redis 自己的 {@code RedisMessageRepositoryTest} 守。
+     * 存储用内存替身：具体介质的实现在 im-storage-jdbc / im-storage-mongodb，im-server 的测试
+     * 不能反向依赖它们（会构成 reactor 环）。本类要验的是「撤回/删除在读写路径上的语义」，
+     * 与介质无关；介质行为由各存储模块自己的测试守。
      */
     private MessageRepository messages() {
         if (messageRepository == null) {

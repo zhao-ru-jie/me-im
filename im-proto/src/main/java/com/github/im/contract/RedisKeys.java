@@ -5,9 +5,13 @@ package com.github.im.contract;
  *
  * <h2>两级分片维度</h2>
  *
+ * <p>这里<b>只有热路径的共享状态</b>：消息体、群资料、成员、关系链这些「历史真相」早已落到
+ * 业务库（{@code im.storage=jdbc} 或 {@code mongodb}），Redis 里不再有它们的副本，
+ * 本类也就不再有对应的 key 构造器。
+ *
  * <p>每个 key 都带一个 <b>hash tag</b>，只有两个维度：
  * <ul>
- *   <li><b>会话维度</b> {@code {conversationId}}：{@code im:conv:{c}:meta} / {@code :msgs} /
+ *   <li><b>会话维度</b> {@code {conversationId}}：{@code im:conv:{c}:meta} /
  *       {@code :seq} / {@code :recalled} / {@code :idem:*}</li>
  *   <li><b>用户维度</b> {@code {userId}}：{@code im:user:{u}:convs} / {@code :read} /
  *       {@code :wm:*} / {@code :offline:*} / {@code :friends} …</li>
@@ -72,11 +76,6 @@ public final class RedisKeys {
         return root + ":conv:" + tag(conversationId) + ":meta";
     }
 
-    /** 会话消息存储（Redis 形态是 List，按 seq 追加；jdbc 形态见 im_message） */
-    public static String convMessages(String conversationId) {
-        return root + ":conv:" + tag(conversationId) + ":msgs";
-    }
-
     /**
      * 会话内序号分配器（String 计数器）。
      *
@@ -86,7 +85,7 @@ public final class RedisKeys {
         return root + ":conv:" + tag(conversationId) + ":seq";
     }
 
-    /** 已撤回的 seq 集合（Set）；与 {@link #convMessages} 同 slot，读路径可以一次拿齐 */
+    /** 已撤回的 seq 集合（Set）；与 {@link #convSeq} 同 slot，读路径可以一次拿齐 */
     public static String convRecalled(String conversationId) {
         return root + ":conv:" + tag(conversationId) + ":recalled";
     }
@@ -231,65 +230,11 @@ public final class RedisKeys {
         return root + ":user:" + tag(userId) + ":legacy-offline";
     }
 
-    // ==== 群维度（tag = {groupId}） ====
-
-    /** 群成员集合（Set），im.storage=redis 时的群成员存储 */
-    public static String groupMembers(String groupId) {
-        return root + ":group:" + tag(groupId) + ":members";
-    }
-
-    /** 群资料（Hash：name / owner_id / announcement / max_members / created_at / muted_all / dismissed） */
-    public static String groupInfo(String groupId) {
-        return root + ":group:" + tag(groupId) + ":info";
-    }
-
-    /**
-     * 群内角色（Hash：{@code userId -> OWNER|ADMIN}）。
-     *
-     * <p>只存非 MEMBER 的角色：绝大多数人是普通成员，把他们也写进来会让这张表
-     * 随群人数线性增长，而读路径只需要回答「这个人是不是管理员」——缺省即 MEMBER。
-     */
-    public static String groupRoles(String groupId) {
-        return root + ":group:" + tag(groupId) + ":roles";
-    }
-
-    /**
-     * 单人禁言到期时间（Hash：{@code userId -> untilEpochMillis}）。
-     *
-     * <p>存到期时间而不是布尔值：禁言天然带时长（10 分钟 / 1 天），
-     * 存布尔就得再存一个「谁在什么时候解除」的定时任务——那是一个最容易没人维护的组件。
-     * 存时间戳则读时比较即可，过期的字段还能顺手清掉。
-     */
-    public static String groupMutes(String groupId) {
-        return root + ":group:" + tag(groupId) + ":mutes";
-    }
-
-    /**
-     * 入群申请（Hash：{@code applicantId -> 申请单 JSON}，带 TTL）。
-     *
-     * <p>用一个 Hash 而不是「每人一条 key」：审批人看的是「这个群有哪些人在等」，
-     * 一次 {@code HGETALL} 就是完整的待审列表；按人拆 key 就得维护一个索引再加 N 次往返，
-     * 而审批列表本来就有上限（同一群体量远小于成员数）。
-     */
-    public static String groupJoinRequests(String groupId) {
-        return root + ":group:" + tag(groupId) + ":join-req";
-    }
-
-    /** 群的邀请码集合（Set：code），只用于「列出 / 吊销」，权威数据在 {@link #groupInvite(String)} */
-    public static String groupInvites(String groupId) {
-        return root + ":group:" + tag(groupId) + ":invites";
-    }
-
-    /**
-     * 单个邀请码（Hash：group_id / inviter_id / created_at / expires_at / max_uses / uses /
-     * approval_required，带 TTL）。
-     *
-     * <p>tag 用 {@code code} 而不是 {@code groupId}：扫码加入时手里只有码，
-     * 必须能<b>一次</b>从码定位到群；把它放进群 slot 就得先知道群才能查码，是个循环。
-     */
-    public static String groupInvite(String code) {
-        return root + ":invite:" + tag(code);
-    }
+    // 「群维度」这一段随 im-storage-redis 一起删光了，现在没有任何群 key：
+    //   群资料 / 成员 / 角色 / 禁言（info / members / roles / mutes）→ 业务库
+    //   入群申请 / 邀请码（join-req / invites / invite）           → 业务库
+    // 它们都是「历史真相」，必须有备份、能查历史、跨重启不变；放进 Redis 只是省事，
+    // 代价是它一旦丢数据，答案就从「重启一次」变成「不可恢复」。
 
     // ==== 路由（tag = {userId}） ====
 

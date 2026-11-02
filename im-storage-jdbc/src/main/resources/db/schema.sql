@@ -145,3 +145,44 @@ CREATE TABLE IF NOT EXISTS im_message_delete
     KEY idx_msg_delete_conv (conversation_id, seq)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COMMENT '用户本地删除记录';
+
+-- 入群申请表：承接 GroupJoinStore（其它介质形态同表/同集合名）
+--
+-- 主键是 group_id:applicant_id 的字符串而不是自增 ID：这条记录天然被「群 + 申请人」
+-- 唯一确定，主键即语义，重复申请就是一次 ON DUPLICATE KEY UPDATE 覆盖写。
+-- 不设 created_at 的 TTL 列：过期由查询条件（created_at >= now - request_ttl）判定，
+-- 过期行不需要被及时删掉——它已经不会再出现在审批列表里了。
+CREATE TABLE IF NOT EXISTS im_group_join_request
+(
+    id           VARCHAR(170) NOT NULL COMMENT 'group_id:applicant_id',
+    group_id     VARCHAR(64)  NOT NULL,
+    applicant_id VARCHAR(64)  NOT NULL,
+    status       VARCHAR(16)  NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING / APPROVED / REJECTED',
+    message      VARCHAR(255) NOT NULL DEFAULT '' COMMENT '申请理由（服务端已按 120 字截断）',
+    created_at   BIGINT       NOT NULL COMMENT '首次申请时间：重新申请不刷新，用于「谁等了最久」排序',
+    updated_at   BIGINT       NOT NULL,
+    PRIMARY KEY (id),
+    KEY idx_join_req_pending (group_id, status, created_at)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COMMENT '入群申请表';
+
+-- 群邀请码表：承接 GroupJoinStore 的邀请码部分
+--
+-- uses 必须是可被并发自增的列：限量校验靠
+-- UPDATE ... SET uses = uses + 1 WHERE code = ? AND (max_uses = 0 OR uses < max_uses)
+-- 的一条语句 + 行锁完成，这也是它不能塞进群表 JSON 字段的原因。
+-- expires_at = 0 表示长期有效（由 im.group.invite-ttl 兜底判定）。
+CREATE TABLE IF NOT EXISTS im_group_invite
+(
+    code              VARCHAR(32) NOT NULL COMMENT '邀请码（随机 base36，同时是链接里的参数）',
+    group_id          VARCHAR(64) NOT NULL,
+    inviter_id        VARCHAR(64) NOT NULL DEFAULT '' COMMENT '创建者，留痕用',
+    created_at        BIGINT      NOT NULL,
+    expires_at        BIGINT      NOT NULL DEFAULT 0 COMMENT '0 = 长期有效',
+    max_uses          INT         NOT NULL DEFAULT 0 COMMENT '0 = 不限次数',
+    uses              INT         NOT NULL DEFAULT 0,
+    approval_required TINYINT     NOT NULL DEFAULT 0 COMMENT '1 = 用码进来还要管理员审批',
+    PRIMARY KEY (code),
+    KEY idx_invite_group (group_id, created_at)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COMMENT '群邀请码表';

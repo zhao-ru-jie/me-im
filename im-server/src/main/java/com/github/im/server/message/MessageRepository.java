@@ -10,13 +10,16 @@ import java.util.Set;
  *
  * <p>本模块<b>不含任何实现</b>，每种介质各自独立成模块，由 {@code im.storage} 切换：
  * <ul>
- *   <li>{@code im-storage-redis}：{@code com.github.im.storage.redis.RedisMessageRepository}，
- *       Redis List 存 JSON，缺省形态（零外部数据库依赖，本地/联调/小规模）；</li>
  *   <li>{@code im-storage-jdbc}：{@code com.github.im.storage.jdbc.JdbcMessageRepository}，
  *       MySQL，强关系与事务形态；</li>
  *   <li>{@code im-storage-mongodb}：{@code com.github.im.storage.mongodb.MongoMessageRepository}，
- *       MongoDB 文档形态（{@code _id} = serverMsgId，保序与去重由 {@code (conversationId, seq)} 唯一索引兜住）。</li>
+ *       MongoDB 文档形态（{@code _id} = serverMsgId，保序与去重由 {@code (conversationId, seq)} 唯一索引兜住），
+ *       缺省形态。</li>
  * </ul>
+ *
+ * <p>历史消息<b>不落 Redis</b>：Redis 上的 key 会过期、主从切换会丢一段内存，
+ * 而消息历史丢一条就是不可恢复的用户数据。Redis 只承载可重建/可降级的热路径状态
+ * （发号、幂等、离线队列、路由、在线态、水位）。
  *
  * <p>业务侧只依赖 {@code append / before / since} 这几个方法，换介质不改业务代码——
  * 这是这个端口存在的唯一理由。

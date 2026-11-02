@@ -17,8 +17,8 @@ import org.springframework.data.redis.core.StringRedisTemplate;
  *
  * <h2>对宿主环境的边界</h2>
  *
- * <p>只碰自己造的 key：会话 ID 带随机 UUID（{@code im:seq:t:<uuid>} / {@code im:conv:msgs:t:<uuid>}），
- * 用完即删；<b>绝不</b> FLUSH、不扫前缀批量删——开发机上的 Redis 里还有别人的数据。
+ * <p>只碰自己造的 key：会话 ID / 用户 ID 带随机 UUID，用完即删；
+ * <b>绝不</b> FLUSH、不扫前缀批量删——开发机上的 Redis 里还有别人的数据。
  *
  * <p>Redis 不可用时抛 {@link TestAbortedException}：整个用例标记为 skipped 而不是 failed，
  * 让没有 Redis 的环境（CI 纯编译、他人机器）也能跑 {@code mvn test}。
@@ -59,9 +59,5 @@ final class TestRedis {
 
     static String seqKey(String conversationId) {
         return RedisKeys.convSeq(conversationId);
-    }
-
-    static String messagesKey(String conversationId) {
-        return RedisKeys.convMessages(conversationId);
     }
 }
