@@ -8,7 +8,7 @@ services:
   # key 会过期、主从切换会丢一段内存，而消息历史丢一条就是不可恢复的用户数据。
   mongodb:
     image: mongo:7
-    container_name: im-cluster-mongo
+    container_name: me-im-mongo
     ports:
       - "27017:27017"
     # 不启用认证，与 application.yml 里 im.mongo.uri 的默认值一致
@@ -25,7 +25,7 @@ services:
   # 这些都不是「唯一真相」，Redis 故障时各有本地降级（见 RedisDegrade）。
   redis:
     image: redis:7-alpine
-    container_name: im-cluster-redis
+    container_name: me-im-redis
     ports:
       - "6379:6379"
     # 不设置密码，与 application.yml 默认配置一致
@@ -41,7 +41,7 @@ services:
   # 启用方式：启动时设置环境变量 IM_NACOS_ENABLED=true IM_NACOS_ADDR=127.0.0.1:8848
   nacos:
     image: nacos/nacos-server:v2.5.1
-    container_name: im-cluster-nacos
+    container_name: me-im-nacos
     environment:
       - MODE=standalone
       - NACOS_AUTH_ENABLE=false

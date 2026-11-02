@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "im-cluster 的移动端 H5 客户端（Vue3 + TS）",
+  "description": "me-im 的移动端 H5 客户端（Vue3 + TS）",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

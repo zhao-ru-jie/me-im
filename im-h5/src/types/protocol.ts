@@ -1,5 +1,5 @@
 /**
- * 与 im-cluster 服务端对齐的线协议类型。
+ * 与 me-im 服务端对齐的线协议类型。
  *
  * 这里只写「真正在线上跑」的字段，来源：
  * - 上行：`im-gateway/.../protocol/ClientFrames.java` + `SessionLifecycle` 的解析

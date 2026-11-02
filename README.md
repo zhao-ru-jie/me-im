@@ -1,4 +1,4 @@
-# im-cluster — 可运行的 IM 集群骨架
+# me-im — 可运行的 IM 集群骨架
 
 一个能真跑起来的 IM 后端骨架：客户端 A 连在网关 1、客户端 B 连在网关 2（不同 JVM / 不同机器），
 A 发给 B 的消息经 **Redis 在线路由表定位目标网关 + gRPC 实例间转发** 送达；网关不可达时转入离线队列，
@@ -849,7 +849,7 @@ im:
   storage: jdbc            # mongodb（默认）| jdbc
   db:
     # rewriteBatchedStatements=true：驱动把批量插入压成一条多值 INSERT，省 round trip
-    url: jdbc:mysql://127.0.0.1:3306/im-cluster?useSSL=false&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true
+    url: jdbc:mysql://127.0.0.1:3306/me-im?useSSL=false&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true
     username: root
     password: root
     pool-size: 20
@@ -1497,7 +1497,7 @@ kubectl apply -f k8s/im-node.yaml     # 或 im-gateway.yaml + im-server.yaml（�
 ## 代码结构
 
 ```
-im-cluster/
+me-im/
 ├── pom.xml                      # 父 POM + 模块列表 + 版本管理
 ├── docker-compose.yml           # Redis + Nacos(standalone)
 ├── scripts/

@@ -12,10 +12,10 @@
     </parent>
 
     <groupId>com.github</groupId>
-    <artifactId>im-cluster</artifactId>
+    <artifactId>me-im</artifactId>
     <version>1.0.0</version>
     <packaging>pom</packaging>
-    <name>im-cluster</name>
+    <name>me-im</name>
     <description>IM 服务：按职责拆分为长连接服务(im-gateway)与 IM 业务服务(im-server)</description>
 
     <properties>

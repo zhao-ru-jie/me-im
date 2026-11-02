@@ -94,7 +94,7 @@ im:
       fail-threshold: ${IM_REDIS_DEGRADE_FAIL_THRESHOLD:3}
       open-millis: ${IM_REDIS_DEGRADE_OPEN_MILLIS:2000}
   db:
-    url: ${IM_DB_URL:jdbc:mysql://127.0.0.1:3306/im-cluster?useSSL=true&useUnicode=true&characterEncoding=UTF-8&autoReconnect=true&failOverReadOnly=false}
+    url: ${IM_DB_URL:jdbc:mysql://127.0.0.1:3306/me-im?useSSL=true&useUnicode=true&characterEncoding=UTF-8&autoReconnect=true&failOverReadOnly=false}
     username: ${IM_DB_USERNAME:root}
     password: ${IM_DB_PASSWORD:root}
     pool-size: ${IM_DB_POOL_SIZE:20}

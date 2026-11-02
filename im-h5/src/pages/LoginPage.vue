@@ -54,7 +54,7 @@ function resetEndpoints(): void {
   <div class="page">
     <div class="login-hero">
       <div class="login-logo">IM</div>
-      <div class="login-title">im-cluster</div>
+      <div class="login-title">me-im</div>
       <div class="login-sub">输入任意 userId 即可进入（服务端无鉴权）</div>
     </div>
 

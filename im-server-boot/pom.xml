@@ -6,7 +6,7 @@
 
     <parent>
         <groupId>com.github</groupId>
-        <artifactId>im-cluster</artifactId>
+        <artifactId>me-im</artifactId>
         <version>1.0.0</version>
     </parent>
 
