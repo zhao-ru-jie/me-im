@@ -120,6 +120,14 @@ im:
       # 抖动上限：每条连接的 ping 时刻在 [ping-after, ping-after+jitter] 内随机，
       # 避免「一批同时建立的连接」在同一毫秒集中发心跳（发版后集中重连时最明显）
       jitter-ms: ${IM_IDLE_JITTER_MS:5000}
+      # 上行背压（积压超过 max-pending-frames 而暂停读取）期间，本连接读不到任何入站帧，
+      # 包括客户端回的 pong —— 此时若仍按上面的 close-after 判死，会把健康连接误杀，
+      # 并引发「过载 → 批量断连 → 集中重连 → 再次过载」的放大效应。
+      # 因此暂停期间心跳判定作废，改由这个上限兜底：暂停超过该时长仍未恢复才主动断开
+      # （关闭原因 backpressure-timeout，与心跳超时分开计数）。
+      # 建议明显短于 close-after-ms，又远大于正常暂停时长（正常只有秒级）。<=0 表示不设上限，
+      # 但那样下游长期不消化会留下「出站正常、入站卡死」的单向死连接。
+      backpressure-timeout-ms: ${IM_IDLE_BACKPRESSURE_TIMEOUT_MS:30000}
   node:
     # 实例 ID 自动探测（K8s: POD_IP / POD_NAME），与 gRPC 端口拼成 host:port
     grpc-port: ${IM_GRPC_PORT:9090}

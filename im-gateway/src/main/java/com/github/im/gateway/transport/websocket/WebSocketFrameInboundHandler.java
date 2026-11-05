@@ -2,6 +2,7 @@ package com.github.im.gateway.transport.websocket;
 
 import com.github.im.gateway.session.NettyClientSession;
 import com.github.im.gateway.session.SessionAttributes;
+import com.github.im.gateway.transport.BackpressureState;
 import com.github.im.gateway.transport.SerialExecutor;
 import com.github.im.gateway.transport.SessionLifecycle;
 import io.netty.channel.Channel;
@@ -28,6 +29,8 @@ import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
  *
  * <p><b>背压</b>：积压超过高水位时不开除连接，而是 {@code setAutoRead(false)} 暂停读，
  * 把压力交回客户端（TCP 窗口收缩）；降到低水位自动恢复。见 {@link SerialExecutor#onBackpressure}。
+ * 暂停/恢复同时写入 {@link BackpressureState}，让心跳 handler 知道「没读到上行」是
+ * 我们主动不读造成的，而不是客户端已死。
  *
  * <p>协议级 ping/pong 帧（{@code PingWebSocketFrame}）由 {@code WebSocketServerProtocolHandler}
  * 自动应答，不会走到这里——业务层的 {@code {"type":"ping"}} 是另一套应用级心跳。
@@ -39,12 +42,16 @@ public class WebSocketFrameInboundHandler extends SimpleChannelInboundHandler<Te
 
     private final SessionLifecycle lifecycle;
     private final SerialExecutor serial;
+    /** 与本连接的心跳 handler 共享：暂停读取期间心跳判定必须失效 */
+    private final BackpressureState backpressure;
     /** 握手完成后由虚拟线程赋值；channelInactive 也在这条串行队列里读，volatile 只为跨线程可见性 */
     private volatile NettyClientSession session;
 
-    public WebSocketFrameInboundHandler(SessionLifecycle lifecycle, SerialExecutor serial) {
+    public WebSocketFrameInboundHandler(SessionLifecycle lifecycle, SerialExecutor serial,
+                                        BackpressureState backpressure) {
         this.lifecycle = lifecycle;
         this.serial = serial;
+        this.backpressure = backpressure;
     }
 
     @Override
@@ -52,8 +59,15 @@ public class WebSocketFrameInboundHandler extends SimpleChannelInboundHandler<Te
         // 背压钩子：暂停/恢复只作用在本连接上，两个方向都可能跨线程调用，Channel 内部已保证线程安全
         Channel channel = ctx.channel();
         serial.onBackpressure(
-                () -> channel.config().setAutoRead(false),
                 () -> {
+                    // 先翻状态再关读：心跳 handler 看到 paused=true 时一定已经读到真实状态
+                    backpressure.markPaused();
+                    channel.config().setAutoRead(false);
+                },
+                () -> {
+                    // 先翻状态再开读：否则背压看门狗可能在「已决定恢复、状态还没翻」的窗口里
+                    // 读到 paused=true 并把连接关掉
+                    backpressure.markResumed();
                     if (channel.isActive()) {
                         channel.config().setAutoRead(true);
                     }

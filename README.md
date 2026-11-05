@@ -806,6 +806,14 @@ conversationId / seq / contentType），怎么推由 `VendorPushPort` 的实现�
 用应用层 JSON ping 而不是 WebSocket 协议级 Ping：浏览器 JS 发不了协议级 ping，TCP 更没有，
 统一在业务帧层才能让两种传输的心跳语义一致。未认证连接不发 ping，第二次空闲直接断。
 
+**与上行背压的关系**：背压会 `setAutoRead(false)` 暂停读取，此时本连接读不到任何入站字节，
+客户端回的 `pong` 会停在 socket 缓冲区里。所以暂停期间**心跳判定作废**（不发 ping、已挂的关闭任务
+到期也放弃），判据从「没收到上行 ⇒ 客户端死了」修正为「没收到上行**且我们确实在读** ⇒ 客户端死了」。
+否则过载会演变成「批量误杀 → 集中重连 → 再次过载」，恰好是背压想避免的活锁。
+暂停时长改由 `backpressure-timeout-ms`（默认 30s）兜底：超时仍未恢复就以
+`backpressure-timeout` 主动断开，并单独计入 `gateway_biz_backpressure_timeout_total`
+——不能省，否则下游彻底 hang 时会留下「出站正常、入站卡死」的单向死连接。
+
 ### 优雅摘流
 
 缩容 / 发版必须走（否则客户端集体硬断、触发重连风暴）：
@@ -1434,6 +1442,7 @@ kubectl apply -f k8s/im-node.yaml     # 或 im-gateway.yaml + im-server.yaml（�
 | `im.gateway.idle.enabled` | `IM_IDLE_ENABLED` | `true` | 心跳总开关 |
 | `im.gateway.idle.ping-after-ms` | `IM_IDLE_PING_AFTER_MS` | `45000` | 空闲多久发 ping |
 | `im.gateway.idle.close-after-ms` | `IM_IDLE_CLOSE_AFTER_MS` | `90000` | 空闲多久断开 |
+| `im.gateway.idle.backpressure-timeout-ms` | `IM_IDLE_BACKPRESSURE_TIMEOUT_MS` | `30000` | 上行背压暂停读取期间不判心跳超时；暂停超过该时长仍未恢复才按 `backpressure-timeout` 主动断开（`<=0` 不设上限） |
 | `im.gateway.drain.enabled` / `timeout-ms` / `retry-after-ms` | `IM_DRAIN_*` | `true` / `45000` / `1500` | 优雅摘流 |
 
 ### 接入鉴权

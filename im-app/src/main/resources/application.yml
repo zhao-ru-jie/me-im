@@ -181,6 +181,9 @@ im:
       # 抖动上限：每条连接的 ping 时刻随机落在 [ping-after, ping-after+jitter]，
       # 避免集中重连后心跳同时爆发
       jitter-ms: ${IM_IDLE_JITTER_MS:5000}
+      # 上行背压暂停读取期间不判心跳超时（读不到 pong，判了会误杀健康连接）；
+      # 暂停超过该时长仍未恢复才主动断开，原因记为 backpressure-timeout。<=0 表示不设上限
+      backpressure-timeout-ms: ${IM_IDLE_BACKPRESSURE_TIMEOUT_MS:30000}
   node:
     # 网关实例 ID 不需要手动指定：自动 = 探测到的可达地址:grpc-port
     # 探测优先级见 NodeAddressResolver：IM_GRPC_HOST -> K8s POD_IP -> POD_NAME -> 本机非回环 IP -> 127.0.0.1

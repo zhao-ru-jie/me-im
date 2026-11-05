@@ -6,6 +6,7 @@ import com.github.im.gateway.protocol.ClientFrames;
 import com.github.im.gateway.session.ClientSession;
 import com.github.im.gateway.session.NettyClientSession;
 import com.github.im.gateway.session.SessionAttributes;
+import com.github.im.gateway.transport.BackpressureState;
 import com.github.im.gateway.transport.SerialExecutor;
 import com.github.im.gateway.transport.SessionLifecycle;
 import io.netty.channel.Channel;
@@ -36,6 +37,8 @@ import java.util.concurrent.TimeUnit;
  * 若在 event loop 上读 {@code session == null} 就当成未认证，第二条帧会被误判为非法首帧。
  *
  * <p><b>背压</b>：积压超过高水位时 {@code setAutoRead(false)} 暂停读而不是断连，降到低水位自动恢复。
+ * 暂停/恢复同时写入 {@link BackpressureState}，让心跳 handler 知道「没读到上行」是
+ * 我们主动不读造成的，而不是客户端已死。
  *
  * @author zhaorujie
  * @since 1.0.0
@@ -49,17 +52,20 @@ public class TcpFrameInboundHandler extends SimpleChannelInboundHandler<String> 
     private final long authTimeoutMs;
     private final AuthGuard authGuard;
     private final SerialExecutor serial;
+    /** 与本连接的心跳 handler 共享：暂停读取期间心跳判定必须失效 */
+    private final BackpressureState backpressure;
 
     /** 认证成功后才非空；为 null 表示当前连接还没绑定身份（只在串行队列里读写） */
     private volatile NettyClientSession session;
 
     public TcpFrameInboundHandler(SessionLifecycle lifecycle, ClientFrames frames, long authTimeoutMs,
-                                  AuthGuard authGuard, SerialExecutor serial) {
+                                  AuthGuard authGuard, SerialExecutor serial, BackpressureState backpressure) {
         this.lifecycle = lifecycle;
         this.frames = frames;
         this.authTimeoutMs = authTimeoutMs;
         this.authGuard = authGuard;
         this.serial = serial;
+        this.backpressure = backpressure;
     }
 
     @Override
@@ -67,8 +73,15 @@ public class TcpFrameInboundHandler extends SimpleChannelInboundHandler<String> 
         // 背压钩子：暂停/恢复只作用在本连接上
         Channel channel = ctx.channel();
         serial.onBackpressure(
-                () -> channel.config().setAutoRead(false),
                 () -> {
+                    // 先翻状态再关读：心跳 handler 看到 paused=true 时一定已经读到真实状态
+                    backpressure.markPaused();
+                    channel.config().setAutoRead(false);
+                },
+                () -> {
+                    // 先翻状态再开读：否则背压看门狗可能在「已决定恢复、状态还没翻」的窗口里
+                    // 读到 paused=true 并把连接关掉
+                    backpressure.markResumed();
                     if (channel.isActive()) {
                         channel.config().setAutoRead(true);
                     }

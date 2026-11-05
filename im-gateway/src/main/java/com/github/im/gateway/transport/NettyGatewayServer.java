@@ -118,6 +118,8 @@ public class NettyGatewayServer {
     private final long closeAfterMs;
     /** 抖动上限：单条连接的 ping 时刻在 [pingAfter, pingAfter+jitter] 之间随机 */
     private final long jitterMs;
+    /** 上行背压暂停读取的最长时长：超过就主动断开（<=0 表示不限制） */
+    private final long backpressureTimeoutMs;
     private final boolean wsEnabled;
     private final int wsPort;
     private final String wsPath;
@@ -146,7 +148,8 @@ public class NettyGatewayServer {
                               @Value("${im.gateway.idle.enabled:true}") boolean heartbeatEnabled,
                               @Value("${im.gateway.idle.ping-after-ms:45000}") long pingAfterMs,
                               @Value("${im.gateway.idle.close-after-ms:90000}") long closeAfterMs,
-                              @Value("${im.gateway.idle.jitter-ms:5000}") long jitterMs) {
+                              @Value("${im.gateway.idle.jitter-ms:5000}") long jitterMs,
+                              @Value("${im.gateway.idle.backpressure-timeout-ms:30000}") long backpressureTimeoutMs) {
         this.lifecycle = lifecycle;
         this.drainService = drainService;
         this.frames = frames;
@@ -164,6 +167,7 @@ public class NettyGatewayServer {
         this.pingAfterMs = pingAfterMs;
         this.closeAfterMs = closeAfterMs;
         this.jitterMs = Math.max(jitterMs, 0L);
+        this.backpressureTimeoutMs = backpressureTimeoutMs;
     }
 
     @PostConstruct
@@ -181,6 +185,13 @@ public class NettyGatewayServer {
         if (heartbeatEnabled) {
             log.info("[netty] 心跳已启用：{}~{}ms 无上行发 ping（每连接随机抖动 ≤{}ms），"
                     + "再按 close-after={}ms 判定超时断开", pingAfterMs, pingAfterMs + jitterMs, jitterMs, closeAfterMs);
+            if (backpressureTimeoutMs > 0) {
+                log.info("[netty] 上行背压暂停读取期间不判心跳超时；暂停超过 {}ms 才按 backpressure-timeout 主动断开",
+                        backpressureTimeoutMs);
+            } else {
+                log.warn("[netty] backpressure-timeout-ms<=0：上行背压暂停读取时不设上限，"
+                        + "下游长期不消化会留下「出站正常、入站卡死」的单向死连接");
+            }
             if (pingAfterMs >= TYPICAL_LB_IDLE_TIMEOUT_MS) {
                 // 不做硬校验（各环境 LB 配置不同），但这类配置几乎一定会被中间设备先掐断，必须提示
                 log.warn("[netty] ping-after-ms={}ms 不小于常见 LB 空闲超时 {}ms，连接可能被中间设备先断开；"
@@ -293,11 +304,13 @@ public class NettyGatewayServer {
      * <p>必须放在出站编码器之后：它要往客户端写 ping，WS 需要经过文本帧编码器、
      * TCP 需要经过长度前缀编码器，否则裸 String 会一路漏到 HTTP / 原始字节层报错。
      */
-    private void addHeartbeatHandler(ChannelPipeline pipeline, String prefix, HeartbeatTiming timing) {
+    private void addHeartbeatHandler(ChannelPipeline pipeline, String prefix, HeartbeatTiming timing,
+                                     BackpressureState backpressure) {
         if (timing == null) {
             return;
         }
-        pipeline.addLast(prefix + "-heartbeat", new HeartbeatHandler(frames, metrics, timing.closeDelayMs()));
+        pipeline.addLast(prefix + "-heartbeat",
+                new HeartbeatHandler(frames, metrics, timing.closeDelayMs(), backpressure, backpressureTimeoutMs));
     }
 
     private ChannelInitializer<SocketChannel> websocketInitializer() {
@@ -321,11 +334,14 @@ public class NettyGatewayServer {
                 pipeline.addLast("ws-protocol",
                         new WebSocketServerProtocolHandler(wsPath, null, true, maxFrameBytes));
                 pipeline.addLast("ws-encoder", new StringToWebSocketFrameEncoder());
-                addHeartbeatHandler(pipeline, "ws", heartbeat);
+                // 背压状态在「心跳」与「入站 handler」之间共享：必须先建好再交给心跳，
+                // 否则暂停读取期间心跳会把「读不到 pong」误判成客户端已死
+                BackpressureState backpressure = new BackpressureState();
+                addHeartbeatHandler(pipeline, "ws", heartbeat, backpressure);
                 // 上行业务跑在每连接一条的串行虚拟线程上（见 BusinessDispatcher），
                 // event loop 只负责解码与把帧投递进队列，不再等 IM 服务
                 pipeline.addLast("ws-handler",
-                        new WebSocketFrameInboundHandler(lifecycle, businessDispatcher.serial("ws")));
+                        new WebSocketFrameInboundHandler(lifecycle, businessDispatcher.serial("ws"), backpressure));
             }
         };
     }
@@ -352,14 +368,17 @@ public class NettyGatewayServer {
                 pipeline.addLast("tcp-frame-prepender", new LengthFieldPrepender(4));
                 pipeline.addLast("tcp-string-decoder", new StringDecoder(StandardCharsets.UTF_8));
                 pipeline.addLast("tcp-string-encoder", new StringEncoder(StandardCharsets.UTF_8));
-                addHeartbeatHandler(pipeline, "tcp", heartbeat);
+                // 背压状态在「心跳」与「入站 handler」之间共享：必须先建好再交给心跳，
+                // 否则暂停读取期间心跳会把「读不到 pong」误判成客户端已死
+                BackpressureState backpressure = new BackpressureState();
+                addHeartbeatHandler(pipeline, "tcp", heartbeat, backpressure);
                 // 必须每连接 new：该 handler 持有本连接的 session 字段（认证前为 null），
                 // 共享会让不同连接串用同一个身份。它不是 @Sharable，共享也会被 Netty 直接拒绝。
                 // 无状态依赖（lifecycle / frames / authGuard）本来就是构造注入的单例，不需要在这里省。
                 // 认证与业务帧都由它投递到本连接的串行虚拟线程，event loop 不再被 gRPC 阻塞。
                 pipeline.addLast("tcp-handler",
                         new TcpFrameInboundHandler(lifecycle, frames, tcpAuthTimeoutMs, authGuard,
-                                businessDispatcher.serial("tcp")));
+                                businessDispatcher.serial("tcp"), backpressure));
             }
         };
     }

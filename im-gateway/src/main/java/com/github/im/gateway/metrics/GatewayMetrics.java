@@ -35,6 +35,10 @@ import java.util.concurrent.atomic.AtomicInteger;
  *       <b>上行背压</b>状态：当前有多少条连接因为处理不过来而暂停了读取，
  *       以及累计暂停/恢复次数。持续有值说明下游（Redis/DB/IM 服务）跟不上，
  *       是「该扩容还是该查下游」的第一手判断依据。</li>
+ *   <li>{@code gateway_biz_backpressure_timeout_total}（Counter）——
+ *       背压暂停超过上限被<b>主动断开</b>的连接数（关闭原因 {@code backpressure-timeout}）。
+ *       它与 {@code gateway_sessions_idle_closed_total} 严格分开：后者是客户端真的死了，
+ *       前者是下游长时间不消化。混在一起会让排障方向完全跑偏。</li>
  * </ul>
  *
  * <p>没有 {@link MeterRegistry}（未启用 actuator/metrics）时自动降级为空实现，不影响网关功能。
@@ -52,6 +56,7 @@ public class GatewayMetrics {
     private final Counter idleClosed;
     private final Counter bizPaused;
     private final Counter bizResumed;
+    private final Counter bizTimeout;
 
     /**
      * 当前处于「暂停读取」状态的连接数。
@@ -71,6 +76,7 @@ public class GatewayMetrics {
             this.idleClosed = null;
             this.bizPaused = null;
             this.bizResumed = null;
+            this.bizTimeout = null;
             return;
         }
         Gauge.builder("gateway.connections.active", connectionManager, ConnectionManager::connectionCount)
@@ -95,6 +101,9 @@ public class GatewayMetrics {
                 .description("累计触发上行背压（暂停读取）的次数").register(registry);
         this.bizResumed = Counter.builder("gateway.biz.backpressure.resumed")
                 .description("累计从上行背压恢复（恢复读取）的次数").register(registry);
+        this.bizTimeout = Counter.builder("gateway.biz.backpressure.timeout")
+                .description("上行背压暂停读取超过上限、连接被主动断开的次数（原因 backpressure-timeout）")
+                .register(registry);
     }
 
     /**
@@ -151,6 +160,18 @@ public class GatewayMetrics {
         bizPausedActive.updateAndGet(active -> active > 0 ? active - 1 : 0);
         if (bizResumed != null) {
             bizResumed.increment();
+        }
+    }
+
+    /**
+     * 某条连接因背压暂停过久被主动断开。
+     *
+     * <p>与 {@link #sessionIdleClosed(int)} 分开计：两者排障方向完全不同——
+     * 前者查下游（Redis / DB / IM 服务处理不过来），后者查客户端（进程被杀 / 网络半开）。
+     */
+    public void backpressureTimeout() {
+        if (bizTimeout != null) {
+            bizTimeout.increment();
         }
     }
 
